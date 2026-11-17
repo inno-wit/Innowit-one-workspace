@@ -63,6 +63,6 @@ Method: Vite dev server + Chrome with dedicated temp profile via CDP (`--remote-
 
 ## Pending (in flight)
 
-- Persistence-after-reload round-trip verification (mutate → reload → compare localStorage fingerprints).
-- Narrow-viewport (mobile) render inspection.
-- REA QuickBooks benchmark — after baseline report finalized.
+- QuickBooks benchmark from public official sources (research lane in progress; no paid access per revised master prompt §3).
+- Dependency & ownership map (repo audit lane in progress → `docs/architecture/DEPENDENCY_MAP.md`).
+- Narrow-viewport (mobile) render inspection — deferred to Playwright (REA scenario browser has no viewport option).
