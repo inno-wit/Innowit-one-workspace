@@ -20,7 +20,8 @@ Status vocabulary (master prompt §0.5): **Verified working** / **Partially work
 | REA inspection report (Innowit app) | **Verified working** | `docs/audit/REA_INNOWIT_INSPECTION.md` — live click-through, persistence round-trip, per-view spot checks, evidence IDs, REA tooling contract notes |
 | QuickBooks feature benchmark | **In progress** | `docs/research/QUICKBOOKS_FEATURE_BENCHMARK.md` — research lane dispatched (public official sources only, no paid access per revised master prompt §3; evidence classes A–D) |
 | Architecture decision records | **Verified working** | `docs/architecture/DECISIONS.md` — ADR-0001 Tauri 2 + Node API + PostgreSQL/Prisma; ADR-0002 token auth in OS secure storage; ADR-0003 esbuild ^0.28.2; ADR-0004 lint-is-typecheck; **ADR-0005 offline approach (online-first, no authoritative local state); ADR-0006 migration strategy (expand/contract + localStorage import wizard)** |
-| Dependency & ownership map | **In progress** | `docs/architecture/DEPENDENCY_MAP.md` — repo audit lane dispatched |
+| Dependency & ownership map | **Verified working** | `docs/architecture/DEPENDENCY_MAP.md` — 28 views, 8 localStorage keys in source (4 live), 12+ cross-module dependencies, top-10 refactor risk flags with line refs. Produced by repo-audit lane; producer wrote to a typo'd path (`Innovit-…`), relocated by orchestrator and content-verified against live inspection evidence (phase-legend misalignment annotated in-file) |
+| Acceptance matrix (seeded) | **Partially working** | `docs/testing/ACCEPTANCE_MATRIX.md` — 8 user journeys (all Missing), Phase 1 gate checklist, role×module matrix, 8 negative tests (N1–N8). Filled per-phase as gates are exercised |
 | Prioritized backlog with risk labels | **Verified working** | `docs/audit/DEFECT_REGISTER.md` priority column + per-phase plan below |
 
 ### Tests run this phase
