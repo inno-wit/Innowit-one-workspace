@@ -17,8 +17,10 @@ Status vocabulary (master prompt §0.5): **Verified working** / **Partially work
 | Reproducible defect list | **Verified working** | `docs/audit/DEFECT_REGISTER.md` (D-001…D-017, P0/P1/P2) |
 | Live app launch + navigation inspection | **Partially working** | `docs/audit/BASELINE.md §Live app inspection` — all 23 nav destinations clicked (47/47 steps OK); 5 high-risk views render with real content, zero console errors; **persistence round-trip complete: account created via real UI is lost on reload** (memory-only state, live evidence `ev_afe9a375…`/`ev_5d8cb24e…`). Narrow viewport still open |
 | Spec requirements matrix | **Verified working** | `docs/audit/SPEC_ANALYSIS.md` — 7 aistudio spec docs consolidated; prescribed Prisma model; 11 architecture discrepancies; design tokens |
-| QuickBooks feature benchmark | **Blocked-unverified** | `docs/research/QUICKBOOKS_FEATURE_BENCHMARK.md` skeleton — awaiting REA evidence collection against authorized targets |
-| Architecture decision records | **Partially working** | `docs/architecture/DECISIONS.md` (ADR-0001 Tauri 2 + Node API + PostgreSQL/Prisma; ADR-0002 token auth in OS secure storage; ADR-0003 esbuild ^0.28.2; ADR-0004 lint-is-typecheck). Still owed: offline approach, migration strategy, dependency/ownership map |
+| REA inspection report (Innowit app) | **Verified working** | `docs/audit/REA_INNOWIT_INSPECTION.md` — live click-through, persistence round-trip, per-view spot checks, evidence IDs, REA tooling contract notes |
+| QuickBooks feature benchmark | **In progress** | `docs/research/QUICKBOOKS_FEATURE_BENCHMARK.md` — research lane dispatched (public official sources only, no paid access per revised master prompt §3; evidence classes A–D) |
+| Architecture decision records | **Verified working** | `docs/architecture/DECISIONS.md` — ADR-0001 Tauri 2 + Node API + PostgreSQL/Prisma; ADR-0002 token auth in OS secure storage; ADR-0003 esbuild ^0.28.2; ADR-0004 lint-is-typecheck; **ADR-0005 offline approach (online-first, no authoritative local state); ADR-0006 migration strategy (expand/contract + localStorage import wizard)** |
+| Dependency & ownership map | **In progress** | `docs/architecture/DEPENDENCY_MAP.md` — repo audit lane dispatched |
 | Prioritized backlog with risk labels | **Verified working** | `docs/audit/DEFECT_REGISTER.md` priority column + per-phase plan below |
 
 ### Tests run this phase
