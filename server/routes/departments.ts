@@ -78,7 +78,10 @@ router.get('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANA
 // POST /api/departments
 router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANAGER'), validateBody(createDepartmentSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const department = await prisma.department.create({
-    data: req.body,
+    data: {
+      ...req.body,
+      organizationId: req.user!.organizationId,
+    },
   });
 
   res.status(201).json({ data: department });

@@ -114,18 +114,24 @@ class EtimsWorker {
       const response = await this.submitToEtims(config.apiUrl, clientSecret, etimsPayload);
 
       if (response.success) {
-        // Success - create EtimsInvoice record
+        // Success - create EtimsInvoice record (audit fix ETIMS-3: check for
+        // existing EtimsInvoice first so retries never duplicate the record)
         await prisma.$transaction(async (tx) => {
-          await tx.etimsInvoice.create({
-            data: {
-              salesInvoiceId: salesInvoice.id,
-              kraControlNumber: response.controlNumber,
-              internalData: response.internalData,
-              qrCodeUrl: response.qrCodeUrl,
-              submissionDate: new Date(),
-              ackCode: response.ackCode || '00',
-            },
+          const existingEtimsInvoice = await tx.etimsInvoice.findUnique({
+            where: { salesInvoiceId: salesInvoice.id },
           });
+          if (!existingEtimsInvoice) {
+            await tx.etimsInvoice.create({
+              data: {
+                salesInvoiceId: salesInvoice.id,
+                kraControlNumber: response.controlNumber,
+                internalData: response.internalData,
+                qrCodeUrl: response.qrCodeUrl,
+                submissionDate: new Date(),
+                ackCode: response.ackCode || '00',
+              },
+            });
+          }
 
           await tx.etimsTransmissionQueue.update({
             where: { id },

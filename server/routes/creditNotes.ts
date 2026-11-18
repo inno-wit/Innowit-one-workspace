@@ -152,13 +152,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     throw new AppError(400, 'NO_ETIMS', 'Cannot create credit note for invoice not submitted to eTIMS');
   }
 
-  // Verify credit note number uniqueness
+  // Verify credit note number uniqueness (audit fix SC-6: tenant-scoped)
   const existing = await prisma.creditNote.findUnique({
-    where: { creditNoteNumber: data.creditNoteNumber },
+    where: { organizationId_creditNoteNumber: { organizationId: req.user!.organizationId, creditNoteNumber: data.creditNoteNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_CREDIT_NOTE_NUMBER', 'Credit note number already exists');
+    throw new AppError(409, 'DUPLICATE_CREDIT_NOTE_NUMBER', 'Credit note number already exists in this organization');
   }
 
   // Validate items don't exceed original invoice quantities
@@ -193,6 +193,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     // Create credit note
     const newCreditNote = await tx.creditNote.create({
       data: {
+        organizationId: req.user!.organizationId,
         salesInvoiceId: data.salesInvoiceId,
         creditNoteNumber: data.creditNoteNumber,
         reason: data.reason,

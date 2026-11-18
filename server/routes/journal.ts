@@ -138,13 +138,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     throw new AppError(400, 'UNBALANCED_ENTRY', 'Total debits must equal total credits');
   }
 
-  // Check if entry number already exists
+  // Check if entry number already exists (audit fix SC-6: tenant-scoped)
   const existing = await prisma.journalEntry.findUnique({
-    where: { entryNumber: data.entryNumber },
+    where: { organizationId_entryNumber: { organizationId: req.user!.organizationId, entryNumber: data.entryNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_ENTRY_NUMBER', 'Entry number already exists');
+    throw new AppError(409, 'DUPLICATE_ENTRY_NUMBER', 'Entry number already exists in this organization');
   }
 
   // Verify all accounts belong to organization
@@ -162,41 +162,47 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     throw new AppError(403, 'FORBIDDEN', 'Account belongs to different organization');
   }
 
-  const entry = await prisma.journalEntry.create({
-    data: {
-      ...data,
-      postingDate: new Date(data.postingDate),
-      organizationId: req.user!.organizationId,
-      lines: {
-        create: data.lines.map((line: any) => ({
-          accountId: line.accountId,
-          description: line.description,
-          debit: line.debit,
-          credit: line.credit,
-        })),
-      },
-    },
-    include: {
-      lines: {
-        include: {
-          account: { select: { id: true, accountNumber: true, name: true, type: true } },
+  // Audit fix ACC-1: wrap entry + lines + balance updates in a single
+  // $transaction so a mid-sequence failure cannot leave an unbalanced GL.
+  // Also use Prisma's `increment` (Decimal-safe) instead of float math.
+  const entry = await prisma.$transaction(async (tx) => {
+    const createdEntry = await tx.journalEntry.create({
+      data: {
+        ...data,
+        postingDate: new Date(data.postingDate),
+        organizationId: req.user!.organizationId,
+        lines: {
+          create: data.lines.map((line: any) => ({
+            accountId: line.accountId,
+            description: line.description,
+            debit: line.debit,
+            credit: line.credit,
+          })),
         },
       },
-    },
-  });
+      include: {
+        lines: {
+          include: {
+            account: { select: { id: true, accountNumber: true, name: true, type: true } },
+          },
+        },
+      },
+    });
 
-  // Update account balances
-  for (const line of data.lines) {
-    const account = accounts.find(a => a.id === line.accountId);
-    if (account) {
-      const balanceChange = line.debit - line.credit;
-      const newBalance = Number(account.currentBalance) + balanceChange;
-      await prisma.account.update({
-        where: { id: account.id },
-        data: { currentBalance: newBalance },
-      });
+    // Update account balances atomically
+    for (const line of data.lines) {
+      const account = accounts.find(a => a.id === line.accountId);
+      if (account) {
+        const balanceChange = line.debit - line.credit;
+        await tx.account.update({
+          where: { id: account.id },
+          data: { currentBalance: { increment: balanceChange } },
+        });
+      }
     }
-  }
+
+    return createdEntry;
+  });
 
   res.status(201).json({ data: entry });
 }));
@@ -329,13 +335,13 @@ router.post('/:id/reverse', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN',
     throw new AppError(400, 'ALREADY_REVERSED', 'Entry already reversed');
   }
 
-  // Check if reversal entry number exists
+  // Check if reversal entry number exists (audit fix SC-6: tenant-scoped)
   const existing = await prisma.journalEntry.findUnique({
-    where: { entryNumber: reversalEntryNumber },
+    where: { organizationId_entryNumber: { organizationId: req.user!.organizationId, entryNumber: reversalEntryNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_ENTRY_NUMBER', 'Reversal entry number already exists');
+    throw new AppError(409, 'DUPLICATE_ENTRY_NUMBER', 'Reversal entry number already exists in this organization');
   }
 
   // Create reversal entry

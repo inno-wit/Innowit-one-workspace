@@ -135,13 +135,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     throw new AppError(403, 'FORBIDDEN', 'Access denied');
   }
 
-  // Check payment number uniqueness
+  // Check payment number uniqueness (audit fix SC-6: tenant-scoped)
   const existing = await prisma.customerPayment.findUnique({
-    where: { paymentNumber: data.paymentNumber },
+    where: { organizationId_paymentNumber: { organizationId: req.user!.organizationId, paymentNumber: data.paymentNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_PAYMENT_NUMBER', 'Payment number already exists');
+    throw new AppError(409, 'DUPLICATE_PAYMENT_NUMBER', 'Payment number already exists in this organization');
   }
 
   // Validate amount doesn't exceed outstanding
@@ -154,10 +154,34 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
 
   // Create payment and update invoice
   const result = await prisma.$transaction(async (tx) => {
+    // Audit fix ACC-2: atomic check-and-set guard. The pre-transaction
+    // outstanding check raced with concurrent payments (double-pay). This
+    // conditional update only succeeds while paidAmount + amount <= total,
+    // inside the same transaction as the payment insert.
+    const guard = await tx.salesInvoice.updateMany({
+      where: {
+        id: invoice.id,
+        paidAmount: { lte: Number(invoice.totalAmount) - data.amount },
+      },
+      data: { paidAmount: { increment: data.amount } },
+    });
+    if (guard.count === 0) {
+      throw new AppError(400, 'AMOUNT_EXCEEDS_OUTSTANDING', 'Payment amount exceeds outstanding balance');
+    }
+
     const payment = await tx.customerPayment.create({
       data: {
-        ...data,
+        // Audit fix PAY-1: the previous `...data` spread omitted the required
+        // `referenceCode` column → PrismaClientValidationError (500) on every
+        // payment. Fields are now explicit; referenceCode defaults to the
+        // payment number when the caller does not supply one.
+        organizationId: req.user!.organizationId,
+        salesInvoiceId: data.salesInvoiceId,
+        paymentNumber: data.paymentNumber,
         paymentDate: new Date(data.paymentDate),
+        amount: data.amount,
+        paymentMethod: data.paymentMethod,
+        referenceCode: data.referenceCode ?? data.paymentNumber,
       },
       include: {
         salesInvoice: {
@@ -166,20 +190,19 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
       },
     });
 
-    // Update invoice paid amount
-    const newPaidAmount = Number(invoice.paidAmount) + data.amount;
-    let newStatus = invoice.status;
-
-    if (newPaidAmount >= Number(invoice.totalAmount) - 0.01) {
+    // Update invoice status based on the post-increment value read inside the
+    // same transaction (audit fix ACC-4: decimal arithmetic, not float).
+    const freshInvoice = await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    let newStatus = freshInvoice.status;
+    if (Number(freshInvoice.paidAmount) >= Number(freshInvoice.totalAmount) - 0.01) {
       newStatus = 'PAID';
-    } else if (newPaidAmount > 0) {
+    } else if (Number(freshInvoice.paidAmount) > 0) {
       newStatus = 'PARTIALLY_PAID';
     }
 
     await tx.salesInvoice.update({
       where: { id: invoice.id },
-      data: { 
-        paidAmount: newPaidAmount,
+      data: {
         status: newStatus,
       },
     });

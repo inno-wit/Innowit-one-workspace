@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { prisma } from '../prisma';
-import { generateAccessToken, generateRefreshToken, storeRefreshToken, validateRefreshToken, revokeRefreshToken, revokeAllUserRefreshTokens, JWTPayload } from '../utils/auth';
+import { generateAccessToken, generateRefreshToken, storeRefreshToken, validateRefreshToken, revokeRefreshToken, revokeAllUserRefreshTokens, verifyRefreshToken, JWTPayload } from '../utils/auth';
 import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
@@ -20,9 +20,18 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
+// Audit fix AUTH-8: password complexity policy (previously length-8 only).
+export const PASSWORD_POLICY = z
+  .string()
+  .min(10, 'Password must be at least 10 characters')
+  .regex(/[A-Z]/, 'Password must contain an uppercase letter')
+  .regex(/[a-z]/, 'Password must contain a lowercase letter')
+  .regex(/[0-9]/, 'Password must contain a digit')
+  .regex(/[^A-Za-z0-9]/, 'Password must contain a symbol');
+
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+  newPassword: PASSWORD_POLICY,
 });
 
 // POST /api/auth/login
@@ -66,10 +75,13 @@ router.post('/login', validateBody(loginSchema), asyncHandler(async (req: Authen
   await storeRefreshToken(user.id, refreshToken, expiresAt);
 
   // Set refresh token as httpOnly cookie
+  // Audit fix AUTH-7: CSRF protection — use 'strict' sameSite for the cookie-based
+  // refresh flow; the access token (short-lived, in Authorization header) is
+  // the primary credential. 'lax' remains on logout/clear for compatibility.
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'strict',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
 
@@ -93,8 +105,17 @@ router.post('/login', validateBody(loginSchema), asyncHandler(async (req: Authen
 router.post('/refresh', validateBody(refreshSchema), asyncHandler(async (req, res) => {
   const { refreshToken } = req.body;
 
+  // Audit fix AUTH-3: reuse/theft detection. A structurally valid refresh token
+  // that is no longer in the store has already been rotated — either its owner
+  // refreshed twice (benign) or an attacker replayed a stolen token. In both
+  // cases the safe response is to invalidate the user's ENTIRE refresh-token
+  // set and force a fresh login.
   const validation = await validateRefreshToken(refreshToken);
   if (!validation) {
+    const decoded = verifyRefreshToken(refreshToken);
+    if (decoded) {
+      await revokeAllUserRefreshTokens(decoded.userId);
+    }
     throw new AppError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token');
   }
 
@@ -135,7 +156,7 @@ router.post('/refresh', validateBody(refreshSchema), asyncHandler(async (req, re
   res.cookie('refreshToken', newRefreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    sameSite: 'strict',
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 

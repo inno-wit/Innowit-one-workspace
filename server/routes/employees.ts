@@ -133,13 +133,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANAGE
     throw new AppError(404, 'NOT_FOUND', 'Department not found');
   }
 
-  // Check employee code uniqueness
+  // Check employee code uniqueness (audit fix SC-6: tenant-scoped)
   const existingCode = await prisma.employee.findUnique({
-    where: { employeeCode: data.employeeCode },
+    where: { organizationId_employeeCode: { organizationId: req.user!.organizationId, employeeCode: data.employeeCode } },
   });
 
   if (existingCode) {
-    throw new AppError(409, 'DUPLICATE_EMPLOYEE_CODE', 'Employee code already exists');
+    throw new AppError(409, 'DUPLICATE_EMPLOYEE_CODE', 'Employee code already exists in this organization');
   }
 
   // Check national ID uniqueness if provided
@@ -155,6 +155,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANAGE
 
   const employee = await prisma.employee.create({
     data: {
+      organizationId: req.user!.organizationId,
       ...data,
       hireDate: new Date(data.hireDate),
     },
@@ -196,14 +197,14 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANA
     }
   }
 
-  // Check employee code uniqueness if changing
+  // Check employee code uniqueness if changing (audit fix SC-6: tenant-scoped)
   if (data.employeeCode && data.employeeCode !== employee.employeeCode) {
     const existing = await prisma.employee.findUnique({
-      where: { employeeCode: data.employeeCode },
+      where: { organizationId_employeeCode: { organizationId: req.user!.organizationId, employeeCode: data.employeeCode } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_EMPLOYEE_CODE', 'Employee code already exists');
+      throw new AppError(409, 'DUPLICATE_EMPLOYEE_CODE', 'Employee code already exists in this organization');
     }
   }
 

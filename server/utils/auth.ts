@@ -1,10 +1,25 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma';
 import { UserRole } from '@prisma/client';
 
 export { UserRole };
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
+// Audit fix AUTH-1: no silent fallback secret. A missing or weak JWT_SECRET in
+// production previously signed tokens with a public default string (full auth
+// bypass). The process now refuses to start instead.
+function requireJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      'FATAL: JWT_SECRET is missing or shorter than 32 characters. Refusing to start — ' +
+      'set a strong JWT_SECRET in the environment (never commit it).'
+    );
+  }
+  return secret;
+}
+
+const JWT_SECRET = requireJwtSecret();
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '15m';
 const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || '7d';
 
@@ -47,11 +62,19 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload | null {
   }
 }
 
+/**
+ * Audit fix AUTH-2: refresh tokens are stored as SHA-256 hashes, never in
+ * plaintext. A database leak no longer exposes usable sessions.
+ */
+export function hashRefreshToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 export async function storeRefreshToken(userId: string, token: string, expiresAt: Date): Promise<void> {
   await prisma.refreshToken.create({
     data: {
       userId,
-      token,
+      token: hashRefreshToken(token),
       expiresAt,
     },
   });
@@ -62,7 +85,7 @@ export async function validateRefreshToken(token: string): Promise<{ userId: str
   if (!payload) return null;
 
   const storedToken = await prisma.refreshToken.findUnique({
-    where: { token },
+    where: { token: hashRefreshToken(token) },
     include: { user: true },
   });
 
@@ -79,7 +102,7 @@ export async function validateRefreshToken(token: string): Promise<{ userId: str
 
 export async function revokeRefreshToken(token: string): Promise<void> {
   await prisma.refreshToken.deleteMany({
-    where: { token },
+    where: { token: hashRefreshToken(token) },
   });
 }
 

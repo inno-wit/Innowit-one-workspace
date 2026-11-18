@@ -29,11 +29,14 @@ export function errorHandler(
 
   // Zod validation errors
   if (err instanceof ZodError) {
+    // zod v4 renamed `errors` to `issues`; support both defensively (audit fix VAL-1)
+    const issues: Array<{ path: (string | number | symbol)[]; message: string }> =
+      (err as any).issues ?? (err as any).errors ?? [];
     res.status(400).json({
       error: 'Validation failed',
       code: 'VALIDATION_ERROR',
-      details: err.errors.map(e => ({
-        field: e.path.join('.'),
+      details: issues.map((e) => ({
+        field: e.path.map(String).join('.'),
         message: e.message,
       })),
     });

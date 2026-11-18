@@ -164,17 +164,18 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
     throw new AppError(403, 'FORBIDDEN', 'Product belongs to different organization');
   }
 
-  // Check quotation number uniqueness
+  // Check quotation number uniqueness (audit fix SC-6: tenant-scoped)
   const existing = await prisma.quotation.findUnique({
-    where: { quotationNumber: data.quotationNumber },
+    where: { organizationId_quotationNumber: { organizationId: req.user!.organizationId, quotationNumber: data.quotationNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_QUOTATION_NUMBER', 'Quotation number already exists');
+    throw new AppError(409, 'DUPLICATE_QUOTATION_NUMBER', 'Quotation number already exists in this organization');
   }
 
   const quotation = await prisma.quotation.create({
     data: {
+      organizationId: req.user!.organizationId,
       ...data,
       validUntil: new Date(data.validUntil),
       items: {
@@ -238,14 +239,14 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_M
     }
   }
 
-  // Check quotation number if changing
+  // Check quotation number if changing (audit fix SC-6: tenant-scoped)
   if (data.quotationNumber && data.quotationNumber !== quotation.quotationNumber) {
     const existing = await prisma.quotation.findUnique({
-      where: { quotationNumber: data.quotationNumber },
+      where: { organizationId_quotationNumber: { organizationId: req.user!.organizationId, quotationNumber: data.quotationNumber } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_QUOTATION_NUMBER', 'Quotation number already exists');
+      throw new AppError(409, 'DUPLICATE_QUOTATION_NUMBER', 'Quotation number already exists in this organization');
     }
   }
 

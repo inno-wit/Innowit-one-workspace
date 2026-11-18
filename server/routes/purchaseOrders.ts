@@ -132,17 +132,18 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREME
     throw new AppError(404, 'NOT_FOUND', 'Supplier not found');
   }
 
-  // Check PO number uniqueness
+  // Check PO number uniqueness (audit fix SC-6: tenant-scoped)
   const existing = await prisma.purchaseOrder.findUnique({
-    where: { poNumber: data.poNumber },
+    where: { organizationId_poNumber: { organizationId: req.user!.organizationId, poNumber: data.poNumber } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_PO_NUMBER', 'PO number already exists');
+    throw new AppError(409, 'DUPLICATE_PO_NUMBER', 'PO number already exists in this organization');
   }
 
   const order = await prisma.purchaseOrder.create({
     data: {
+      organizationId: req.user!.organizationId,
       ...data,
       orderDate: new Date(data.orderDate),
     },
@@ -195,14 +196,14 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'PROCURE
     }
   }
 
-  // Check PO number if changing
+  // Check PO number if changing (audit fix SC-6: tenant-scoped)
   if (data.poNumber && data.poNumber !== order.poNumber) {
     const existing = await prisma.purchaseOrder.findUnique({
-      where: { poNumber: data.poNumber },
+      where: { organizationId_poNumber: { organizationId: req.user!.organizationId, poNumber: data.poNumber } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_PO_NUMBER', 'PO number already exists');
+      throw new AppError(409, 'DUPLICATE_PO_NUMBER', 'PO number already exists in this organization');
     }
   }
 

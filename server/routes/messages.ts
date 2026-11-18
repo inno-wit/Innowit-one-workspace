@@ -196,6 +196,7 @@ router.post('/', authenticateToken, validateBody(createMessageSchema), asyncHand
     data: {
       ...data,
       senderId: req.user!.userId,
+      organizationId: req.user!.organizationId,
     },
     include: {
       sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },

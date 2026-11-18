@@ -4,8 +4,18 @@ import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { 
+  getTenantContext, 
+  verifyOrgOwnership, 
+  orgWhereClause, 
+  sanitizeCreateInput, 
+  sanitizeUpdateInput 
+} from '../middleware/tenant';
 
 const router = Router();
+
+// Apply tenant isolation enforcement to all customer routes
+router.use(authenticateToken);
 
 const createCustomerSchema = z.object({
   customerCode: z.string().min(1, 'Customer code is required').max(50),
@@ -33,13 +43,12 @@ const listQuerySchema = z.object({
 });
 
 // GET /api/customers
-router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.get('/', validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const tenant = getTenantContext(req);
   const { page, limit, search, hasKraPin } = req.query as any;
   const skip = (page - 1) * limit;
 
-  const where: any = {
-    organizationId: req.user!.organizationId,
-  };
+  const where = orgWhereClause(tenant, {});
 
   if (search) {
     where.OR = [
@@ -87,7 +96,7 @@ router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(
 }));
 
 // GET /api/customers/:id
-router.get('/:id', authenticateToken, validateParams(customerParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:id', validateParams(customerParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   const customer = await prisma.customer.findUnique({
@@ -118,36 +127,32 @@ router.get('/:id', authenticateToken, validateParams(customerParamsSchema), asyn
     },
   });
 
-  if (!customer) {
-    throw new AppError(404, 'NOT_FOUND', 'Customer not found');
-  }
-
-  if (customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
+  await verifyOrgOwnership(req, customer, 'Customer');
 
   res.json({ data: customer });
 }));
 
 // POST /api/customers
-router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateBody(createCustomerSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.post('/', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateBody(createCustomerSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const data = req.body;
 
-  // Check if customer code already exists in organization
+  // Audit fix SC-6: tenant-scoped unique — check compound key
   const existing = await prisma.customer.findUnique({
-    where: { customerCode: data.customerCode },
+    where: { organizationId_customerCode: { organizationId: req.user!.organizationId, customerCode: data.customerCode } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_CUSTOMER_CODE', 'Customer code already exists');
+    throw new AppError(409, 'DUPLICATE_CUSTOMER_CODE', 'Customer code already exists in this organization');
   }
+
+  // Sanitize input to prevent client-supplied organizationId
+  const createData = sanitizeCreateInput(req, data);
 
   const customer = await prisma.customer.create({
     data: {
-      ...data,
-      organizationId: req.user!.organizationId,
-      creditLimit: data.creditLimit || 0,
-      paymentTermsDays: data.paymentTermsDays || 30,
+      ...createData,
+      creditLimit: createData.creditLimit ?? 0,
+      paymentTermsDays: createData.paymentTermsDays ?? 30,
     },
     include: {
       _count: {
@@ -160,7 +165,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
 }));
 
 // PUT /api/customers/:id
-router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(customerParamsSchema), validateBody(updateCustomerSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:id', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(customerParamsSchema), validateBody(updateCustomerSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const data = req.body;
 
@@ -168,28 +173,25 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_M
     where: { id },
   });
 
-  if (!customer) {
-    throw new AppError(404, 'NOT_FOUND', 'Customer not found');
-  }
-
-  if (customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
+  await verifyOrgOwnership(req, customer, 'Customer');
 
   // Check customer code uniqueness if changing
-  if (data.customerCode && data.customerCode !== customer.customerCode) {
+  if (data.customerCode && data.customerCode !== customer!.customerCode) {
     const existing = await prisma.customer.findUnique({
-      where: { customerCode: data.customerCode },
+      where: { organizationId_customerCode: { organizationId: req.user!.organizationId, customerCode: data.customerCode } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_CUSTOMER_CODE', 'Customer code already exists');
+      throw new AppError(409, 'DUPLICATE_CUSTOMER_CODE', 'Customer code already exists in this organization');
     }
   }
 
+  // Sanitize update input to prevent client-supplied organizationId
+  const updateData = sanitizeUpdateInput(data);
+
   const updatedCustomer = await prisma.customer.update({
     where: { id },
-    data,
+    data: updateData,
     include: {
       _count: {
         select: { deals: true, salesOrders: true, invoices: true, tasks: true },
@@ -201,7 +203,7 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_M
 }));
 
 // DELETE /api/customers/:id
-router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), validateParams(customerParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:id', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), validateParams(customerParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
   const customer = await prisma.customer.findUnique({
@@ -213,15 +215,9 @@ router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALE
     },
   });
 
-  if (!customer) {
-    throw new AppError(404, 'NOT_FOUND', 'Customer not found');
-  }
+  await verifyOrgOwnership(req, customer, 'Customer');
 
-  if (customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  if (customer._count.deals > 0 || customer._count.salesOrders > 0 || customer._count.invoices > 0) {
+  if (customer!._count.deals > 0 || customer!._count.salesOrders > 0 || customer!._count.invoices > 0) {
     throw new AppError(400, 'HAS_DEPENDENCIES', 'Cannot delete customer with existing deals, orders, or invoices');
   }
 
@@ -249,16 +245,14 @@ const createContactSchema = z.object({
 const updateContactSchema = createContactSchema.partial();
 
 // GET /api/customers/:customerId/contacts
-router.get('/:customerId/contacts', authenticateToken, validateParams(z.object({ customerId: z.string().uuid() })), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.get('/:customerId/contacts', validateParams(z.object({ customerId: z.string().uuid() })), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { customerId } = req.params;
 
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
   });
 
-  if (!customer || customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(404, 'NOT_FOUND', 'Customer not found');
-  }
+  await verifyOrgOwnership(req, customer, 'Customer');
 
   const contacts = await prisma.customerContact.findMany({
     where: { customerId },
@@ -269,7 +263,7 @@ router.get('/:customerId/contacts', authenticateToken, validateParams(z.object({
 }));
 
 // POST /api/customers/:customerId/contacts
-router.post('/:customerId/contacts', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(z.object({ customerId: z.string().uuid() })), validateBody(createContactSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.post('/:customerId/contacts', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(z.object({ customerId: z.string().uuid() })), validateBody(createContactSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { customerId } = req.params;
   const data = req.body;
 
@@ -277,9 +271,7 @@ router.post('/:customerId/contacts', authenticateToken, authorize('SUPER_ADMIN',
     where: { id: customerId },
   });
 
-  if (!customer || customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(404, 'NOT_FOUND', 'Customer not found');
-  }
+  await verifyOrgOwnership(req, customer, 'Customer');
 
   const contact = await prisma.customerContact.create({
     data: {
@@ -292,7 +284,7 @@ router.post('/:customerId/contacts', authenticateToken, authorize('SUPER_ADMIN',
 }));
 
 // PUT /api/customers/:customerId/contacts/:contactId
-router.put('/:customerId/contacts/:contactId', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(contactParamsSchema), validateBody(updateContactSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.put('/:customerId/contacts/:contactId', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(contactParamsSchema), validateBody(updateContactSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { contactId } = req.params;
   const data = req.body;
 
@@ -301,9 +293,7 @@ router.put('/:customerId/contacts/:contactId', authenticateToken, authorize('SUP
     include: { customer: true },
   });
 
-  if (!contact || contact.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(404, 'NOT_FOUND', 'Contact not found');
-  }
+  await verifyOrgOwnership(req, contact?.customer ?? null, 'Customer');
 
   const updatedContact = await prisma.customerContact.update({
     where: { id: contactId },
@@ -314,7 +304,7 @@ router.put('/:customerId/contacts/:contactId', authenticateToken, authorize('SUP
 }));
 
 // DELETE /api/customers/:customerId/contacts/:contactId
-router.delete('/:customerId/contacts/:contactId', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), validateParams(contactParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+router.delete('/:customerId/contacts/:contactId', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), validateParams(contactParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { contactId } = req.params;
 
   const contact = await prisma.customerContact.findUnique({
@@ -322,9 +312,7 @@ router.delete('/:customerId/contacts/:contactId', authenticateToken, authorize('
     include: { customer: true },
   });
 
-  if (!contact || contact.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(404, 'NOT_FOUND', 'Contact not found');
-  }
+  await verifyOrgOwnership(req, contact?.customer ?? null, 'Customer');
 
   await prisma.customerContact.delete({
     where: { id: contactId },

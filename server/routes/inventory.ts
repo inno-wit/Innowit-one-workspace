@@ -263,43 +263,27 @@ router.post('/transfer', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'I
     }
   }
 
-  // Get source stock level
-  const fromStockLevel = await prisma.warehouseStock.findUnique({
-    where: {
-      productId_warehouseId: {
+  // Audit fix INV-1: transfer race — the pre-check and create-if-missing for
+  // the destination stock level happened outside the transaction, allowing
+  // concurrent transfers to over-decrement the source. Now the entire operation
+  // (sufficiency guard + both movements + both stock updates) runs in one
+  // $transaction with a conditional decrement on the source (only succeeds
+  // when quantityOnHand >= quantity). The destination uses get-or-create inside
+  // the same transaction.
+  const movements = await prisma.$transaction(async (tx) => {
+    // Guard: decrement source only if on-hand >= quantity (atomic conditional)
+    const decremented = await tx.warehouseStock.updateMany({
+      where: {
         productId,
         warehouseId: fromWarehouseId,
+        quantityOnHand: { gte: quantity },
       },
-    },
-  });
-
-  if (!fromStockLevel || Number(fromStockLevel.quantityOnHand) < quantity) {
-    throw new AppError(400, 'INSUFFICIENT_STOCK', `Insufficient stock in source warehouse. Available: ${fromStockLevel ? Number(fromStockLevel.quantityOnHand) : 0}`);
-  }
-
-  // Get or create destination stock level
-  let toStockLevel = await prisma.warehouseStock.findUnique({
-    where: {
-      productId_warehouseId: {
-        productId,
-        warehouseId: toWarehouseId,
-      },
-    },
-  });
-
-  if (!toStockLevel) {
-    toStockLevel = await prisma.warehouseStock.create({
-      data: {
-        productId,
-        warehouseId: toWarehouseId,
-        quantityOnHand: 0,
-        quantityReserved: 0,
-      },
+      data: { quantityOnHand: { decrement: quantity } },
     });
-  }
+    if (decremented.count === 0) {
+      throw new AppError(400, 'INSUFFICIENT_STOCK', 'Insufficient stock in source warehouse (concurrent transfer?)');
+    }
 
-  // Create both movements and update stock levels in transaction
-  const movements = await prisma.$transaction(async (tx) => {
     // Out movement
     const outMovement = await tx.stockMovement.create({
       data: {
@@ -312,6 +296,16 @@ router.post('/transfer', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'I
         notes: notes ? `${notes} (Transfer out)` : 'Transfer out',
       },
     });
+
+    // Get or create destination stock level
+    let toStockLevel = await tx.warehouseStock.findUnique({
+      where: { productId_warehouseId: { productId, warehouseId: toWarehouseId } },
+    });
+    if (!toStockLevel) {
+      toStockLevel = await tx.warehouseStock.create({
+        data: { productId, warehouseId: toWarehouseId, quantityOnHand: 0, quantityReserved: 0 },
+      });
+    }
 
     // In movement
     const inMovement = await tx.stockMovement.create({
@@ -326,14 +320,9 @@ router.post('/transfer', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'I
       },
     });
 
-    // Update stock levels
+    // Update destination stock level
     await tx.warehouseStock.update({
-      where: { id: fromStockLevel.id },
-      data: { quantityOnHand: { decrement: quantity } },
-    });
-
-    await tx.warehouseStock.update({
-      where: { id: toStockLevel!.id },
+      where: { id: toStockLevel.id },
       data: { quantityOnHand: { increment: quantity } },
     });
 

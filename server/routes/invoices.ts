@@ -227,13 +227,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     throw new AppError(403, 'FORBIDDEN', 'Product belongs to different organization');
   }
 
-  // Check invoice number uniqueness
+  // Check invoice number uniqueness (audit fix SC-6: tenant-scoped)
   const existingInvoice = await prisma.salesInvoice.findUnique({
-    where: { invoiceNumber: data.invoiceNumber },
+    where: { organizationId_invoiceNumber: { organizationId: req.user!.organizationId, invoiceNumber: data.invoiceNumber } },
   });
 
   if (existingInvoice) {
-    throw new AppError(409, 'DUPLICATE_INVOICE_NUMBER', 'Invoice number already exists');
+    throw new AppError(409, 'DUPLICATE_INVOICE_NUMBER', 'Invoice number already exists in this organization');
   }
 
   // Calculate totals
@@ -318,6 +318,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
     // Create invoice with items
     const newInvoice = await tx.salesInvoice.create({
       data: {
+        organizationId: req.user!.organizationId,
         branchId: data.branchId,
         customerId: data.customerId,
         salesOrderId: data.salesOrderId,
@@ -352,13 +353,18 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
       },
     });
 
-    // Create eTIMS transmission queue entry
-    await tx.etimsTransmissionQueue.create({
-      data: {
+    // Create eTIMS transmission queue entry (audit fix ETIMS-2/3: idempotencyKey
+    // is now deterministic — the invoice ID itself — so the same invoice can
+    // never enqueue twice. The @@unique on idempotencyKey enforces this at DB
+    // level. Worker also checks for existing EtimsInvoice before creating.)
+    await tx.etimsTransmissionQueue.upsert({
+      where: { idempotencyKey: newInvoice.id },
+      update: { status: 'PENDING', payloadJson: JSON.stringify({ invoiceId: newInvoice.id }), attemptCount: 0, lastError: null, responseJson: null },
+      create: {
         salesInvoiceId: newInvoice.id,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: newInvoice.id,
         status: 'PENDING',
-        payloadJson: JSON.stringify({ invoiceId: newInvoice.id }), // Simplified
+        payloadJson: JSON.stringify({ invoiceId: newInvoice.id }),
       },
     });
 
@@ -418,14 +424,14 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE
     }
   }
 
-  // Verify invoice number if changing
+  // Verify invoice number if changing (audit fix SC-6: tenant-scoped)
   if (data.invoiceNumber && data.invoiceNumber !== invoice.invoiceNumber) {
     const existing = await prisma.salesInvoice.findUnique({
-      where: { invoiceNumber: data.invoiceNumber },
+      where: { organizationId_invoiceNumber: { organizationId: req.user!.organizationId, invoiceNumber: data.invoiceNumber } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_INVOICE_NUMBER', 'Invoice number already exists');
+      throw new AppError(409, 'DUPLICATE_INVOICE_NUMBER', 'Invoice number already exists in this organization');
     }
   }
 
@@ -636,10 +642,17 @@ router.post('/:id/post', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'F
       data: { status: 'POSTED' },
     });
 
-    // Update eTIMS queue status
-    await tx.etimsTransmissionQueue.updateMany({
-      where: { salesInvoiceId: id, status: 'PENDING' },
-      data: { status: 'PENDING' }, // Will be picked up by background worker
+    // Update eTIMS queue status (audit fix ETIMS-2/3: upsert with deterministic
+    // idempotencyKey so re-posting the same invoice never duplicates the queue)
+    await tx.etimsTransmissionQueue.upsert({
+      where: { idempotencyKey: id },
+      update: { status: 'PENDING', payloadJson: JSON.stringify({ invoiceId: id }), attemptCount: 0, lastError: null, responseJson: null },
+      create: {
+        salesInvoiceId: id,
+        idempotencyKey: id,
+        status: 'PENDING',
+        payloadJson: JSON.stringify({ invoiceId: id }),
+      },
     });
 
     return { journalEntry, updatedInvoice };

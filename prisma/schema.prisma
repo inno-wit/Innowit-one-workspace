@@ -140,6 +140,20 @@ model Organization {
   users            User[]
   etimsConfigs     EtimsConfiguration[]
   accounts         Account[]
+  quotations       Quotation[]
+  salesOrders      SalesOrder[]
+  salesInvoices    SalesInvoice[]
+  customerPayments CustomerPayment[]
+  creditNotes      CreditNote[]
+  purchaseOrders   PurchaseOrder[]
+  suppliers        Supplier[]
+  departments      Department[]
+  employees        Employee[]
+  payrollRuns      PayrollRun[]
+  channels         Channel[]
+  channelMembers   ChannelMember[]
+  messages         Message[]
+  fileAttachments  FileAttachment[]
 }
 
 model Branch {
@@ -213,22 +227,26 @@ model RefreshToken {
 
 model Channel {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   name             String
   description      String?
   isPrivate        Boolean        @default(false)
   createdById      String
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   members          ChannelMember[]
   messages         Message[]
 }
 
 model ChannelMember {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   channelId        String
   userId           String
   joinedAt         DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   channel          Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -237,6 +255,7 @@ model ChannelMember {
 
 model Message {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   channelId        String?
   senderId         String
   recipientId      String?        // Populated for Direct Messages
@@ -246,6 +265,7 @@ model Message {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   channel          Channel?       @relation(fields: [channelId], references: [id], onDelete: Cascade)
   sender           User           @relation(fields: [senderId], references: [id], onDelete: Restrict)
   parent           Message?       @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
@@ -255,6 +275,7 @@ model Message {
 
 model FileAttachment {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   messageId        String?
   fileName         String
   fileSize         Int
@@ -262,6 +283,7 @@ model FileAttachment {
   storagePath      String
   uploadedAt       DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   message          Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
 }
 
@@ -272,7 +294,7 @@ model FileAttachment {
 model Customer {
   id               String         @id @default(uuid())
   organizationId   String
-  customerCode     String         @unique
+  customerCode     String
   name             String
   companyName      String?
   kraPin           String?
@@ -293,6 +315,7 @@ model Customer {
   @@index([kraPin])
   @@index([customerCode])
   @@index([organizationId])
+  @@unique([organizationId, customerCode]) // audit fix SC-6: tenant-scoped
 }
 
 model CustomerContact {
@@ -373,7 +396,7 @@ model Account {
 model JournalEntry {
   id               String         @id @default(uuid())
   organizationId   String
-  entryNumber      String         @unique // e.g. "JE-2026-0001"
+  entryNumber      String // e.g. "JE-2026-0001"
   postingDate      DateTime
   sourceModule     String         // e.g. "SALES_INVOICE", "PAYROLL", "MANUAL"
   sourceId         String?        // ID of originating invoice, bill, etc.
@@ -384,6 +407,7 @@ model JournalEntry {
 
   lines            JournalLine[]
 
+  @@unique([organizationId, entryNumber]) // audit fix SC-6: tenant-scoped
   @@index([postingDate])
   @@index([sourceModule, sourceId])
   @@index([organizationId])
@@ -411,7 +435,7 @@ model JournalLine {
 model Product {
   id               String         @id @default(uuid())
   organizationId   String
-  sku              String         @unique
+  sku              String
   barcode          String?
   name             String
   description      String?
@@ -430,19 +454,21 @@ model Product {
 
   @@index([organizationId])
   @@index([sku])
+  @@unique([organizationId, sku]) // audit fix SC-6: tenant-scoped
 }
 
 model Warehouse {
   id               String         @id @default(uuid())
   branchId         String
   name             String
-  code             String         @unique
+  code             String
   location         String?
 
   branch           Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   stockLevels      WarehouseStock[]
   movements        StockMovement[]
 
+  @@unique([branchId, code]) // audit fix SC-6: branch(tenant)-scoped
   @@index([branchId])
 }
 
@@ -485,30 +511,37 @@ model StockMovement {
 
 model Quotation {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   dealId           String?        @unique
-  quotationNumber  String         @unique
+  quotationNumber  String
   validUntil       DateTime
   totalAmount      Decimal        @db.Decimal(14, 2)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   deal             Deal?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
   salesOrder       SalesOrder?
+
+  @@unique([organizationId, quotationNumber]) // audit fix SC-6: tenant-scoped
 }
 
 model SalesOrder {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   quotationId      String?        @unique
   customerId       String
-  orderNumber      String         @unique
+  orderNumber      String
   orderStatus      OrderStatus    @default(DRAFT)
   totalAmount      Decimal        @db.Decimal(14, 2)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   quotation        Quotation?     @relation(fields: [quotationId], references: [id], onDelete: SetNull)
   customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items            SalesOrderItem[]
   invoice          SalesInvoice?
 
+  @@unique([organizationId, orderNumber]) // audit fix SC-6: tenant-scoped
   @@index([customerId])
   @@index([orderStatus])
 }
@@ -522,7 +555,7 @@ model SalesOrderItem {
   taxRate          Decimal        @default(16.00) @db.Decimal(5, 2)
   totalAmount      Decimal        @db.Decimal(14, 2)
 
-  salesOrder       SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  salesOrder       SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Restrict) // audit fix SC-1: was Cascade — order items are financial line records
   product          Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([salesOrderId])
@@ -531,10 +564,11 @@ model SalesOrderItem {
 
 model SalesInvoice {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   branchId         String
   customerId       String
   salesOrderId     String?        @unique
-  invoiceNumber    String         @unique // Local sequence e.g. "INV-2026-0042"
+  invoiceNumber    String // Local sequence e.g. "INV-2026-0042"
   invoiceDate      DateTime
   dueDate          DateTime
   status           InvoiceStatus  @default(DRAFT)
@@ -545,6 +579,7 @@ model SalesInvoice {
   paidAmount       Decimal        @default(0.00) @db.Decimal(14, 2)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   branch           Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   salesOrder       SalesOrder?    @relation(fields: [salesOrderId], references: [id], onDelete: SetNull)
@@ -554,6 +589,7 @@ model SalesInvoice {
   etimsInvoice     EtimsInvoice?
   transmissionJobs EtimsTransmissionQueue[]
 
+  @@unique([organizationId, invoiceNumber]) // audit fix SC-6: tenant-scoped
   @@index([status])
   @@index([invoiceDate])
   @@index([branchId])
@@ -571,7 +607,7 @@ model SalesInvoiceItem {
   taxAmount        Decimal        @db.Decimal(14, 2)
   lineTotal        Decimal        @db.Decimal(14, 2)
 
-  salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict) // audit fix SC-2: was Cascade — invoice line items are financial records
   product          Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([salesInvoiceId])
@@ -580,31 +616,37 @@ model SalesInvoiceItem {
 
 model CustomerPayment {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   salesInvoiceId   String
-  paymentNumber    String         @unique
+  paymentNumber    String
   paymentDate      DateTime
   amount           Decimal        @db.Decimal(14, 2)
   paymentMethod    String         // e.g. "M-PESA", "BANK_TRANSFER", "CASH"
   referenceCode    String         // e.g. M-Pesa receipt code "QG721HD89"
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
 
+  @@unique([organizationId, paymentNumber]) // audit fix SC-6: tenant-scoped
   @@index([salesInvoiceId])
   @@index([paymentDate])
 }
 
 model CreditNote {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   salesInvoiceId   String
-  creditNoteNumber String         @unique
+  creditNoteNumber String
   reason           String
   totalAmount      Decimal        @db.Decimal(14, 2)
   taxAmount        Decimal        @db.Decimal(14, 2)
   issuedAt         DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
 
+  @@unique([organizationId, creditNoteNumber]) // audit fix SC-6: tenant-scoped
   @@index([salesInvoiceId])
 }
 
@@ -657,8 +699,9 @@ model EtimsTransmissionQueue {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Cascade)
+  salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict) // audit fix SC-3: was Cascade — KRA transmission records are tax-compliance evidence
 
+  @@index([salesInvoiceId]) // audit fix SC-30: FK column was unindexed
   @@index([status, nextRetryAt])
 }
 
@@ -668,6 +711,7 @@ model EtimsTransmissionQueue {
 
 model Supplier {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   name             String
   kraPin           String?
   email            String?
@@ -675,22 +719,28 @@ model Supplier {
   paymentTermsDays Int            @default(30)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   purchaseOrders   PurchaseOrder[]
+
+  @@index([organizationId])
 }
 
 model PurchaseOrder {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: direct tenant scoping
   branchId         String
   supplierId       String
-  poNumber         String         @unique
+  poNumber         String
   orderDate        DateTime
   totalAmount      Decimal        @db.Decimal(14, 2)
   isApproved       Boolean        @default(false)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   branch           Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   supplier         Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
+  @@unique([organizationId, poNumber]) // audit fix SC-6: tenant-scoped
   @@index([branchId])
   @@index([supplierId])
 }
@@ -701,15 +751,21 @@ model PurchaseOrder {
 
 model Department {
   id               String         @id @default(uuid())
-  name             String         @unique
+  organizationId   String         // audit fix SC-23: tenant scoping
+  name             String
   employees        Employee[]
+
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, name]) // audit fix SC-6: tenant-scoped
 }
 
 model Employee {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   userId           String         @unique
   departmentId     String
-  employeeCode     String         @unique
+  employeeCode     String
   nationalId       String?
   kraPin           String?
   nssfNumber       String?
@@ -718,16 +774,19 @@ model Employee {
   hireDate         DateTime
   isActive         Boolean        @default(true)
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   user             User           @relation(fields: [userId], references: [id], onDelete: Restrict)
   department       Department     @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   payslips         Payslip[]
 
+  @@unique([organizationId, employeeCode]) // audit fix SC-6: tenant-scoped
   @@index([departmentId])
   @@index([userId])
 }
 
 model PayrollRun {
   id               String         @id @default(uuid())
+  organizationId   String         // audit fix SC-23: tenant scoping
   month            Int
   year             Int
   totalGross       Decimal        @db.Decimal(14, 2)
@@ -737,9 +796,10 @@ model PayrollRun {
   postedToGl       Boolean        @default(false)
   createdAt        DateTime       @default(now())
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   payslips         Payslip[]
 
-  @@unique([month, year])
+  @@unique([organizationId, month, year]) // audit fix SC-6: tenant-scoped
 }
 
 model Payslip {
@@ -755,7 +815,7 @@ model Payslip {
   housingLevy      Decimal        @db.Decimal(14, 2)
   netPay           Decimal        @db.Decimal(14, 2)
 
-  payrollRun       PayrollRun     @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  payrollRun       PayrollRun     @relation(fields: [payrollRunId], references: [id], onDelete: Restrict) // audit fix SC-4: was Cascade — payslips are payroll financial records
   employee         Employee       @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
   @@index([payrollRunId])

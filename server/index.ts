@@ -6,7 +6,6 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
-import { authenticateToken, AuthenticatedRequest } from './middleware/auth';
 import { prisma } from './prisma';
 
 // Load environment variables
@@ -94,8 +93,14 @@ app.get('/ready', async (req, res) => {
 // API routes (protected)
 const apiRouter = express.Router();
 
-// Apply authentication to all API routes
-apiRouter.use(authenticateToken);
+// NOTE (audit fix AUTH-0): the previous blanket `apiRouter.use(authenticateToken)`
+// sat BEFORE the route mounts, including `/auth`, which made `POST /auth/login`
+// and `POST /auth/refresh` unreachable (they demanded a Bearer token to log in).
+// Authentication is enforced per-endpoint by every route chain
+// (`authenticateToken` / `authorize`), and `/auth/logout` is intentionally
+// token-optional. Do not re-add a router-level auth gate above the mounts.
+// (The `authenticateToken` import was removed with it — every route imports it
+// from middleware/auth directly.)
 
 // Import and mount route handlers
 import authRoutes from './routes/auth';

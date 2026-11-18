@@ -85,7 +85,10 @@ router.get('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'PROCURE
 // POST /api/suppliers
 router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER'), validateBody(createSupplierSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const supplier = await prisma.supplier.create({
-    data: req.body,
+    data: {
+      ...req.body,
+      organizationId: req.user!.organizationId,
+    },
   });
 
   res.status(201).json({ data: supplier });

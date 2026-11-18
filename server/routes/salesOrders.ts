@@ -186,13 +186,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
     throw new AppError(403, 'FORBIDDEN', 'Product belongs to different organization');
   }
 
-  // Check order number uniqueness
+  // Check order number uniqueness (audit fix SC-6: tenant-scoped)
   const existingOrder = await prisma.salesOrder.findUnique({
-    where: { orderNumber: data.orderNumber },
+    where: { organizationId_orderNumber: { organizationId: req.user!.organizationId, orderNumber: data.orderNumber } },
   });
 
   if (existingOrder) {
-    throw new AppError(409, 'DUPLICATE_ORDER_NUMBER', 'Order number already exists');
+    throw new AppError(409, 'DUPLICATE_ORDER_NUMBER', 'Order number already exists in this organization');
   }
 
   // Create order with items and reserve stock
@@ -200,6 +200,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
     // Create sales order
     const newOrder = await tx.salesOrder.create({
       data: {
+        organizationId: req.user!.organizationId,
         quotationId: data.quotationId,
         customerId: data.customerId,
         orderNumber: data.orderNumber,
@@ -229,14 +230,16 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
     for (const item of data.items) {
       const product = products.find(p => p.id === item.productId)!;
       
-      // Find warehouse in customer's branch or default
+      // Find warehouse in customer's branch or default (prefer warehouse with code sorting for determinism)
       let warehouse = await tx.warehouse.findFirst({
         where: { branchId: customer.branchId },
+        orderBy: { code: 'asc' },
       });
       
       if (!warehouse) {
         warehouse = await tx.warehouse.findFirst({
           where: { branch: { organizationId: req.user!.organizationId } },
+          orderBy: { code: 'asc' },
         });
       }
       
@@ -251,6 +254,10 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MAN
         });
 
         if (stockLevel) {
+          const available = Number(stockLevel.quantityOnHand) - Number(stockLevel.quantityReserved);
+          if (available < item.quantity) {
+            throw new AppError(400, 'INSUFFICIENT_STOCK_FOR_RESERVATION', `Insufficient available stock for product ${product.sku}. Available: ${available}, Requested: ${item.quantity}`);
+          }
           await tx.warehouseStock.update({
             where: { id: stockLevel.id },
             data: { quantityReserved: { increment: item.quantity } },
@@ -299,14 +306,14 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_M
     }
   }
 
-  // Verify order number if changing
+  // Verify order number if changing (audit fix SC-6: tenant-scoped)
   if (data.orderNumber && data.orderNumber !== order.orderNumber) {
     const existing = await prisma.salesOrder.findUnique({
-      where: { orderNumber: data.orderNumber },
+      where: { organizationId_orderNumber: { organizationId: req.user!.organizationId, orderNumber: data.orderNumber } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_ORDER_NUMBER', 'Order number already exists');
+      throw new AppError(409, 'DUPLICATE_ORDER_NUMBER', 'Order number already exists in this organization');
     }
   }
 

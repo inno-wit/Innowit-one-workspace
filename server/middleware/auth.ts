@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { verifyAccessToken, extractTokenFromHeader, JWTPayload, requireRole, UserRole } from '../utils/auth';
+import { CROSS_BRANCH_ROLES, getTenantContext } from './tenant';
 
-export { UserRole };
+export { UserRole, CROSS_BRANCH_ROLES };
 
 export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
+  tenant?: ReturnType<typeof getTenantContext>;
 }
 
 export async function authenticateToken(
@@ -76,16 +78,8 @@ export function authorize(...allowedRoles: UserRole[]) {
   };
 }
 
-export function requireOrganizationAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
-  if (!req.user) {
-    res.status(401).json({ error: 'Authentication required', code: 'UNAUTHORIZED' });
-    return;
-  }
-  
-  // User can only access their own organization's data
-  // This is enforced at the query level by always filtering by organizationId
-  next();
-}
+// DEPRECATED: requireOrganizationAccess was a no-op. Use enforceTenantIsolation from middleware/tenant instead.
+// export function requireOrganizationAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void { ... }
 
 export function requireBranchAccess(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
   if (!req.user) {
@@ -93,10 +87,8 @@ export function requireBranchAccess(req: AuthenticatedRequest, res: Response, ne
     return;
   }
   
-  // Users can only access their branch's data unless they're admin/executive
-  const crossBranchRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER'];
-  
-  if (!crossBranchRoles.includes(req.user.role) && req.user.branchId) {
+  // Users can only access their branch's data unless they have cross-branch roles
+  if (!CROSS_BRANCH_ROLES.includes(req.user.role) && req.user.branchId) {
     // Add branchId to query params for downstream use
     (req as any).enforcedBranchId = req.user.branchId;
   }

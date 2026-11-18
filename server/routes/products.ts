@@ -124,13 +124,13 @@ router.get('/:id', authenticateToken, validateParams(productParamsSchema), async
 router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'INVENTORY_MANAGER', 'PROCUREMENT_OFFICER'), validateBody(createProductSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const data = req.body;
 
-  // Check if SKU already exists
+  // Audit fix SC-6: tenant-scoped unique — check compound key
   const existing = await prisma.product.findUnique({
-    where: { sku: data.sku },
+    where: { organizationId_sku: { organizationId: req.user!.organizationId, sku: data.sku } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_SKU', 'SKU already exists');
+    throw new AppError(409, 'DUPLICATE_SKU', 'SKU already exists in this organization');
   }
 
   // Check barcode uniqueness if provided
@@ -181,11 +181,11 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'INVENTO
   // Check SKU uniqueness if changing
   if (data.sku && data.sku !== product.sku) {
     const existing = await prisma.product.findUnique({
-      where: { sku: data.sku },
+      where: { organizationId_sku: { organizationId: req.user!.organizationId, sku: data.sku } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_SKU', 'SKU already exists');
+      throw new AppError(409, 'DUPLICATE_SKU', 'SKU already exists in this organization');
     }
   }
 

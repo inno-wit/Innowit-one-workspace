@@ -125,6 +125,7 @@ router.post('/', authenticateToken, validateBody(createChannelSchema), asyncHand
       data: {
         ...data,
         createdById: req.user!.userId,
+        organizationId: req.user!.organizationId,
       },
     });
 
@@ -133,6 +134,7 @@ router.post('/', authenticateToken, validateBody(createChannelSchema), asyncHand
       data: {
         channelId: newChannel.id,
         userId: req.user!.userId,
+        organizationId: req.user!.organizationId,
       },
     });
 
@@ -208,7 +210,7 @@ router.post('/:id/members', authenticateToken, validateParams(channelParamsSchem
   }
 
   const member = await prisma.channelMember.create({
-    data: { channelId: id, userId },
+    data: { channelId: id, userId, organizationId: req.user!.organizationId },
     include: {
       user: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
     },

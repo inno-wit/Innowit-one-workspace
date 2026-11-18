@@ -8,11 +8,14 @@ export function validateBody<T>(schema: ZodSchema<T>) {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
+        // zod v4 renamed `errors` to `issues`; support both defensively (audit fix VAL-1)
+        const issues: Array<{ path: (string | number | symbol)[]; message: string }> =
+          (error as any).issues ?? (error as any).errors ?? [];
         res.status(400).json({
           error: 'Validation failed',
           code: 'VALIDATION_ERROR',
-          details: error.errors.map(e => ({
-            field: e.path.join('.'),
+          details: issues.map((e) => ({
+            field: e.path.map(String).join('.'),
             message: e.message,
           })),
         });
@@ -30,11 +33,14 @@ export function validateQuery<T>(schema: ZodSchema<T>) {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
+        // zod v4 renamed `errors` to `issues`; support both defensively (audit fix VAL-1)
+        const issues: Array<{ path: (string | number | symbol)[]; message: string }> =
+          (error as any).issues ?? (error as any).errors ?? [];
         res.status(400).json({
           error: 'Query validation failed',
           code: 'VALIDATION_ERROR',
-          details: error.errors.map(e => ({
-            field: e.path.join('.'),
+          details: issues.map((e) => ({
+            field: e.path.map(String).join('.'),
             message: e.message,
           })),
         });
@@ -52,11 +58,14 @@ export function validateParams<T>(schema: ZodSchema<T>) {
       next();
     } catch (error) {
       if (error instanceof ZodError) {
+        // zod v4 renamed `errors` to `issues`; support both defensively (audit fix VAL-1)
+        const issues: Array<{ path: (string | number | symbol)[]; message: string }> =
+          (error as any).issues ?? (error as any).errors ?? [];
         res.status(400).json({
           error: 'Params validation failed',
           code: 'VALIDATION_ERROR',
-          details: error.errors.map(e => ({
-            field: e.path.join('.'),
+          details: issues.map((e) => ({
+            field: e.path.map(String).join('.'),
             message: e.message,
           })),
         });

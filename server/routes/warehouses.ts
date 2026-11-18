@@ -123,13 +123,13 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'INVENTORY
     throw new AppError(404, 'NOT_FOUND', 'Branch not found');
   }
 
-  // Check if code already exists
+  // Check if code already exists in branch (audit fix SC-6: branch-scoped unique)
   const existing = await prisma.warehouse.findUnique({
-    where: { code: data.code },
+    where: { branchId_code: { branchId: data.branchId, code: data.code } },
   });
 
   if (existing) {
-    throw new AppError(409, 'DUPLICATE_CODE', 'Warehouse code already exists');
+    throw new AppError(409, 'DUPLICATE_CODE', 'Warehouse code already exists in this branch');
   }
 
   const warehouse = await prisma.warehouse.create({
@@ -161,14 +161,15 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'INVENTO
     throw new AppError(403, 'FORBIDDEN', 'Access denied');
   }
 
-  // Check code uniqueness if changing
+  // Check code uniqueness if changing (audit fix SC-6: branch-scoped unique)
   if (data.code && data.code !== warehouse.code) {
+    const branchId = data.branchId ?? warehouse.branchId;
     const existing = await prisma.warehouse.findUnique({
-      where: { code: data.code },
+      where: { branchId_code: { branchId, code: data.code } },
     });
 
     if (existing) {
-      throw new AppError(409, 'DUPLICATE_CODE', 'Warehouse code already exists');
+      throw new AppError(409, 'DUPLICATE_CODE', 'Warehouse code already exists in this branch');
     }
   }
 

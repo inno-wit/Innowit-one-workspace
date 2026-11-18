@@ -5,8 +5,20 @@ import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { ROLE_HIERARCHY } from '../utils/auth';
 
 const router = Router();
+
+/**
+ * Audit fix AUTH-4: a principal may only assign roles strictly BELOW their own
+ * role in the hierarchy. SUPER_ADMIN is only assignable by SUPER_ADMIN. This
+ * closes the privilege-escalation path where an ADMIN/HR_MANAGER could mint
+ * SUPER_ADMIN accounts.
+ */
+function canAssignRole(actorRole: UserRole, targetRole: UserRole): boolean {
+  if (actorRole === 'SUPER_ADMIN') return true;
+  return ROLE_HIERARCHY[targetRole] < ROLE_HIERARCHY[actorRole];
+}
 
 const createUserSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -157,9 +169,21 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANAGE
 
   const passwordHash = await bcrypt.hash(data.password, 12);
 
+  // Audit fix USR-1: the previous `...data` spread forwarded the raw `password`
+  // field to Prisma (unknown argument → 500 on EVERY user create). Build the
+  // payload explicitly instead.
+  // Audit fix AUTH-4: role-assignment hierarchy enforced.
+  if (!canAssignRole(req.user!.role, data.role)) {
+    throw new AppError(403, 'ROLE_ESCALATION_FORBIDDEN', `Role ${req.user!.role} cannot assign role ${data.role}`);
+  }
+
   const user = await prisma.user.create({
     data: {
-      ...data,
+      email: data.email,
+      fullName: data.fullName,
+      role: data.role,
+      branchId: data.branchId ?? null,
+      avatarUrl: data.avatarUrl ?? null,
       passwordHash,
       organizationId: req.user!.organizationId,
     },
@@ -195,11 +219,35 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANA
     throw new AppError(403, 'FORBIDDEN', 'Access denied');
   }
 
-  const updateData: any = { ...data };
-  
+  // Audit fix AUTH-4: hierarchy guard on role changes (PUT was equally exploitable).
+  if (data.role && data.role !== existingUser.role && !canAssignRole(req.user!.role, data.role)) {
+    throw new AppError(403, 'ROLE_ESCALATION_FORBIDDEN', `Role ${req.user!.role} cannot assign role ${data.role}`);
+  }
+
+  // Audit fix AUTH-5: only SUPER_ADMIN may deactivate another SUPER_ADMIN.
+  if (data.isActive === false && existingUser.role === 'SUPER_ADMIN' && req.user!.role !== 'SUPER_ADMIN') {
+    throw new AppError(403, 'FORBIDDEN', 'Only a SUPER_ADMIN can deactivate a SUPER_ADMIN');
+  }
+
+  const updateData: any = {
+    email: data.email,
+    fullName: data.fullName,
+    role: data.role,
+    branchId: data.branchId,
+    avatarUrl: data.avatarUrl,
+    isActive: data.isActive,
+  };
+  // Prisma treats `undefined` as "leave unchanged", so the explicit undefined
+  // values above are safe.
+  Object.keys(updateData).forEach((k) => updateData[k] === undefined && delete updateData[k]);
+
+  let roleOrActivityChanged = false;
+  if (data.role && data.role !== existingUser.role) roleOrActivityChanged = true;
+  if (data.isActive === false && existingUser.isActive) roleOrActivityChanged = true;
+
   if (data.password) {
     updateData.passwordHash = await bcrypt.hash(data.password, 12);
-    delete updateData.password;
+    roleOrActivityChanged = true; // force re-login on password reset
   }
 
   const user = await prisma.user.update({
@@ -217,6 +265,12 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANA
       updatedAt: true,
     },
   });
+
+  // Audit fix AUTH-5: demotion, deactivation or password reset must not leave
+  // stale sessions alive (refresh tokens previously survived up to 7 days).
+  if (roleOrActivityChanged) {
+    await prisma.refreshToken.deleteMany({ where: { userId: id } });
+  }
 
   res.json({ data: user });
 }));

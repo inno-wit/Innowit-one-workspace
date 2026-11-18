@@ -4,7 +4,7 @@ import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
-import { decrypt } from '../utils/encryption';
+import { decrypt, encrypt } from '../utils/encryption';
 
 const router = Router();
 
@@ -93,12 +93,19 @@ router.post('/config', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FIN
     throw new AppError(409, 'CONFIG_EXISTS', `eTIMS configuration for ${data.environment} already exists`);
   }
 
-  // Encrypt client secret
-  const clientSecretEnc = require('../utils/encryption').encrypt(data.clientSecret);
+  // Encrypt client secret (audit fix ETIMS-5: `require` is not defined in the
+  // ESM-compiled route — use a top-level import; also stop spreading the raw
+  // `clientSecret` field into the Prisma payload, which has no such column).
+  const clientSecretEnc = encrypt(data.clientSecret);
 
   const config = await prisma.etimsConfiguration.create({
     data: {
-      ...data,
+      mode: data.mode,
+      environment: data.environment,
+      taxpayerPin: data.taxpayerPin,
+      branchCode: data.branchCode,
+      deviceSerial: data.deviceSerial,
+      apiUrl: data.apiUrl,
       clientSecretEnc,
       organizationId: req.user!.organizationId,
     },
@@ -127,11 +134,19 @@ router.put('/config/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', '
     throw new AppError(403, 'FORBIDDEN', 'Access denied');
   }
 
-  const updateData: any = { ...data };
-  
+  const updateData: any = {
+    mode: data.mode,
+    environment: data.environment,
+    taxpayerPin: data.taxpayerPin,
+    branchCode: data.branchCode,
+    deviceSerial: data.deviceSerial,
+    apiUrl: data.apiUrl,
+  };
+  Object.keys(updateData).forEach((k) => updateData[k] === undefined && delete updateData[k]);
+
   if (data.clientSecret) {
-    updateData.clientSecretEnc = require('../utils/encryption').encrypt(data.clientSecret);
-    delete updateData.clientSecret;
+    // audit fix ETIMS-5: import-based encrypt instead of CJS require
+    updateData.clientSecretEnc = encrypt(data.clientSecret);
   }
 
   const updatedConfig = await prisma.etimsConfiguration.update({

@@ -108,7 +108,7 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'HR_MANAGE
   }
 
   const run = await prisma.payrollRun.create({
-    data: { month, year },
+    data: { organizationId: req.user!.organizationId, month, year },
   });
 
   res.status(201).json({ data: run });
