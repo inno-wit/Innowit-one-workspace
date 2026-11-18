@@ -3,7 +3,7 @@
 **Generated:** 2026-11-18  
 **Scope:** Complete remediation work performed during Phase 2 closeout  
 **Baseline:** `PHASE-2-REMEDIATION-BASELINE.md`  
-**Remediation Commit:** `930091af2abbd7cd4d8e3939f1db87b99e77c993` (HEAD)  
+**Remediation Commit:** `07101accac5582ba6743597d74d29d9475ae19ca` (work/innowit-one-build)  
 
 ---
 
