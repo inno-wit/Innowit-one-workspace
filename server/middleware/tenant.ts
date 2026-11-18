@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { AuthenticatedRequest, UserRole } from './auth';
+import { AppError } from './errorHandler';
 
 /**
  * Centralized tenant isolation enforcement.
@@ -85,11 +86,11 @@ export async function verifyOrgOwnership<T extends { organizationId: string }>(
   const tenant = getTenantContext(req);
   
   if (!resource) {
-    throw { statusCode: 404, code: 'NOT_FOUND', message: `${resourceName} not found` } as any;
+    throw new AppError(404, 'NOT_FOUND', `${resourceName} not found`);
   }
   
   if (resource.organizationId !== tenant.organizationId) {
-    throw { statusCode: 403, code: 'FORBIDDEN', message: 'Access denied' } as any;
+    throw new AppError(403, 'FORBIDDEN', 'Access denied');
   }
   
   return resource;
@@ -110,7 +111,7 @@ export async function verifyBranchAccess<T extends { branchId: string; organizat
   const verified = await verifyOrgOwnership(req, resource, resourceName);
   
   if (!tenant.canAccessAllBranches && tenant.branchId && verified.branchId !== tenant.branchId) {
-    throw { statusCode: 403, code: 'FORBIDDEN', message: 'Access denied to this branch' } as any;
+    throw new AppError(403, 'FORBIDDEN', 'Access denied to this branch');
   }
   
   return verified;

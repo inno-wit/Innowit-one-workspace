@@ -16,6 +16,10 @@ interface MessageComposerProps {
   onSendMessage: (content: string, attachments?: WorkspaceFile[]) => void;
   placeholder?: string;
   availableFiles?: WorkspaceFile[];
+  /** Called when the user starts typing (key down, non-send key) */
+  onTypingStart?: () => void;
+  /** Called when the user stops typing (message sent or textarea blur) */
+  onTypingStop?: () => void;
 }
 
 const EMOJI_PALETTE = ['👍', '❤️', '🚀', '🎉', '👀', '🔥', '✅', '🔒', '👏', '💡'];
@@ -24,6 +28,8 @@ export function MessageComposer({
   onSendMessage,
   placeholder = 'Type a message... (Shift+Enter for newline, Enter to send)',
   availableFiles = [],
+  onTypingStart,
+  onTypingStop,
 }: MessageComposerProps) {
   const [content, setContent] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -35,6 +41,11 @@ export function MessageComposer({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+      return;
+    }
+    // Fire typing start for any non-modifier key press
+    if (!e.ctrlKey && !e.metaKey && e.key.length === 1) {
+      onTypingStart?.();
     }
   };
 
@@ -48,6 +59,7 @@ export function MessageComposer({
     setSelectedAttachments([]);
     setShowEmojiPicker(false);
     setShowFilePicker(false);
+    onTypingStop?.();
   };
 
   const insertFormatting = (prefix: string, suffix: string = '') => {

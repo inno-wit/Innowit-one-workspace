@@ -1,0 +1,242 @@
+{
+  "generatedAt": "2026-11-18T20:06:19.546Z",
+  "total": 33,
+  "passed": 33,
+  "failed": 0,
+  "results": [
+    {
+      "id": 1,
+      "suite": "AUTH",
+      "expected": "Bad password login returns 401 INVALID_CREDENTIALS from login route",
+      "actual": "HTTP 401 code=INVALID_CREDENTIALS",
+      "pass": true
+    },
+    {
+      "id": 2,
+      "suite": "AUTH",
+      "expected": "Valid login returns 200 + accessToken + role",
+      "actual": "HTTP 200 code=; token=true; role=ADMIN",
+      "pass": true
+    },
+    {
+      "id": 3,
+      "suite": "AUTH",
+      "expected": "GET /api/auth/me returns authenticated user",
+      "actual": "HTTP 200; email=n/a",
+      "pass": true
+    },
+    {
+      "id": 4,
+      "suite": "AUTH",
+      "expected": "Refresh rotation: first use 200, reuse of old token 401",
+      "actual": "first=200 code=; reuse=401 code=INVALID_REFRESH_TOKEN",
+      "pass": true,
+      "notes": "Reuse acceptance = no theft detection (AUTH-3 evidence)"
+    },
+    {
+      "id": 5,
+      "suite": "AUTH",
+      "expected": "Logout invalidates refresh token (refresh after logout = 401)",
+      "actual": "logout=200 code=; refresh-after=401 code=INVALID_REFRESH_TOKEN",
+      "pass": true
+    },
+    {
+      "id": 6,
+      "suite": "AUTH",
+      "expected": "Change-password: old password rejected, new accepted",
+      "actual": "change=200; old-login=401; new-login=200",
+      "pass": true
+    },
+    {
+      "id": 7,
+      "suite": "RBAC",
+      "expected": "EMPLOYEE role denied on POST /api/users (403)",
+      "actual": "HTTP 403 FORBIDDEN",
+      "pass": true
+    },
+    {
+      "id": 8,
+      "suite": "RBAC",
+      "expected": "SALES_REP role denied on POST /api/journal (403)",
+      "actual": "HTTP 403 FORBIDDEN",
+      "pass": true
+    },
+    {
+      "id": 9,
+      "suite": "RBAC",
+      "expected": "ADMIN can create an EMPLOYEE user in own org (201)",
+      "actual": "HTTP 201",
+      "pass": true
+    },
+    {
+      "id": 10,
+      "suite": "RBAC",
+      "expected": "ADMIN must NOT be able to create SUPER_ADMIN (403)",
+      "actual": "HTTP 403; resulting role=not-created",
+      "pass": true,
+      "notes": "If 201 + SUPER_ADMIN user exists in DB → confirmed privilege escalation (AUTH-4)"
+    },
+    {
+      "id": 11,
+      "suite": "TENANT",
+      "expected": "Org B reading org A customer by ID must be denied (403/404)",
+      "actual": "HTTP 403",
+      "pass": true
+    },
+    {
+      "id": 12,
+      "suite": "TENANT",
+      "expected": "Org B updating org A account must be denied",
+      "actual": "HTTP 403; tampered=false",
+      "pass": true
+    },
+    {
+      "id": 13,
+      "suite": "TENANT",
+      "expected": "Client-supplied organizationId must be ignored on create (record belongs to caller org)",
+      "actual": "HTTP 201; record org=5d75b71c-8d95-484c-81df-1e4c1357b11d",
+      "pass": true
+    },
+    {
+      "id": 14,
+      "suite": "ACCOUNTING",
+      "expected": "Balanced journal entry accepted (201)",
+      "actual": "HTTP 201 ",
+      "pass": true
+    },
+    {
+      "id": 15,
+      "suite": "ACCOUNTING",
+      "expected": "Unbalanced journal entry rejected (400)",
+      "actual": "HTTP 400 UNBALANCED_ENTRY",
+      "pass": true
+    },
+    {
+      "id": 16,
+      "suite": "ACCOUNTING",
+      "expected": "Journal entry numbers tenant-scoped: org B can use a number already used by org A (201)",
+      "actual": "orgA=201; orgB=201 ",
+      "pass": true
+    },
+    {
+      "id": 17,
+      "suite": "ACCOUNTING",
+      "expected": "Invoice created (201)",
+      "actual": "HTTP 201; id=b33ef2d6-ab74-4952-8881-8556d5a25546; status=DRAFT",
+      "pass": true
+    },
+    {
+      "id": 18,
+      "suite": "ACCOUNTING",
+      "expected": "Invoice posts to GL + eTIMS queue (200/201)",
+      "actual": "HTTP 200  PUT-status=200",
+      "pass": true,
+      "notes": "Invoice posted to General Ledger and queued for eTIMS submission"
+    },
+    {
+      "id": 19,
+      "suite": "ACCOUNTING",
+      "expected": "Overpayment (amount > outstanding) rejected (400)",
+      "actual": "HTTP 400 AMOUNT_EXCEEDS_OUTSTANDING",
+      "pass": true
+    },
+    {
+      "id": 20,
+      "suite": "ACCOUNTING",
+      "expected": "Full payment accepted; duplicate full payment rejected (paid amount stays = invoice total)",
+      "actual": "pay1=201; pay2=400; paidAmount=3480; payments=1; paid-after-1=3480",
+      "pass": true
+    },
+    {
+      "id": 21,
+      "suite": "ACCOUNTING",
+      "expected": "Reversal: mirrored entry created; original entry + lines preserved",
+      "actual": "reverse=201; mirrored=true; originalLines=2",
+      "pass": true
+    },
+    {
+      "id": 22,
+      "suite": "ACCOUNTING",
+      "expected": "Account with journal postings cannot be deleted",
+      "actual": "HTTP 400; stillExists=true",
+      "pass": true
+    },
+    {
+      "id": 23,
+      "suite": "INVENTORY",
+      "expected": "Two warehouses created (201)",
+      "actual": "w1=201; w2=201",
+      "pass": true
+    },
+    {
+      "id": 24,
+      "suite": "INVENTORY",
+      "expected": "RECEIPT 100 units → on-hand 100",
+      "actual": "HTTP 201; onHand=100",
+      "pass": true
+    },
+    {
+      "id": 25,
+      "suite": "INVENTORY",
+      "expected": "Transfer 30 units: source 70, destination 30",
+      "actual": "HTTP 201; src=70; dst=30",
+      "pass": true
+    },
+    {
+      "id": 26,
+      "suite": "INVENTORY",
+      "expected": "Transfer of 1000 units (only 70 on hand) rejected (400)",
+      "actual": "HTTP 400 INSUFFICIENT_STOCK; src onHand=70",
+      "pass": true
+    },
+    {
+      "id": 27,
+      "suite": "INVENTORY",
+      "expected": "Sales order reserves 40 units (reserved=40)",
+      "actual": "order=201; reserved=40",
+      "pass": true
+    },
+    {
+      "id": 28,
+      "suite": "INVENTORY",
+      "expected": "Over-reservation (1000 units vs 70 on hand) rejected (400)",
+      "actual": "order=400; reserved=40",
+      "pass": true
+    },
+    {
+      "id": 29,
+      "suite": "INVENTORY",
+      "expected": "ADJUSTMENT of -500 must not drive stock negative (400)",
+      "actual": "HTTP 400 VALIDATION_ERROR; onHand=70",
+      "pass": true
+    },
+    {
+      "id": 30,
+      "suite": "ETIMS",
+      "expected": "Sandbox config created (201); client secret NOT returned in plaintext",
+      "actual": "HTTP 201; secretInResponse=false",
+      "pass": true
+    },
+    {
+      "id": 31,
+      "suite": "ETIMS",
+      "expected": "Posting queues eTIMS entry as PENDING (not ACCEPTED) without external response",
+      "actual": "post=200 after-PUT; queueRows=1; statuses=PENDING",
+      "pass": true
+    },
+    {
+      "id": 32,
+      "suite": "ETIMS",
+      "expected": "Retries do not duplicate queue entries for the same invoice (still 1 row, never ACCEPTED)",
+      "actual": "rows-after-retry=1; statuses=PENDING",
+      "pass": true
+    },
+    {
+      "id": 33,
+      "suite": "ETIMS",
+      "expected": "Worker against unreachable KRA never marks queue items ACCEPTED",
+      "actual": "pendingBefore=40; after statuses=PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING",
+      "pass": true
+    }
+  ]
+}

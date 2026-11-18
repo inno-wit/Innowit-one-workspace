@@ -1,0 +1,223 @@
+import { PrismaClient } from '@prisma/client';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Set JWT_SECRET for tests BEFORE importing auth middleware
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-for-testing-only-must-be-32-chars-long-enough';
+
+let prisma: PrismaClient;
+
+// Global test state shared across all test files
+export const testState = {
+  prisma: null as PrismaClient | null,
+  testData: null as any,
+  adminToken: '',
+  memberToken: '',
+  otherOrgToken: '',
+  channelId: '',
+  otherChannelId: '',
+};
+
+export default async function globalSetup() {
+  const testDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/innowit_one?schema=public';
+  process.env.DATABASE_URL = testDbUrl;
+
+  prisma = new PrismaClient({
+    datasources: { db: { url: testDbUrl } },
+  });
+
+  await prisma.$connect();
+  testState.prisma = prisma;
+
+  // Clean any leftover test data first (run once globally)
+  await cleanGlobalTestData(prisma);
+  
+  // Seed base test data (run once globally)
+  testState.testData = await seedGlobalTestData(prisma);
+
+  // Generate tokens
+  const jwt = require('jsonwebtoken');
+  const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key-for-testing-only-must-be-32-chars-long-enough';
+  
+  const generateTestToken = (user: { userId?: string; id?: string; organizationId: string; branchId: string | null; role: string; email: string; fullName?: string }) => {
+    const uid = user.userId || user.id;
+    return jwt.sign(
+      {
+        userId: uid,
+        organizationId: user.organizationId,
+        branchId: user.branchId,
+        role: user.role,
+        email: user.email,
+        fullName: user.fullName || '',
+      },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+  };
+
+  testState.adminToken = generateTestToken({ 
+    ...testState.testData.users[0], 
+    userId: testState.testData.users[0].id, 
+    fullName: testState.testData.users[0].fullName 
+  });
+  testState.memberToken = generateTestToken({ 
+    ...testState.testData.users[1], 
+    userId: testState.testData.users[1].id, 
+    fullName: testState.testData.users[1].fullName 
+  });
+  testState.otherOrgToken = generateTestToken({ 
+    ...testState.testData.users[2], 
+    userId: testState.testData.users[2].id, 
+    fullName: testState.testData.users[2].fullName 
+  });
+
+  // Create fixture channels (shared across all tests)
+  const channel = await prisma.channel.create({
+    data: {
+      name: 'fixture-test-channel',
+      description: 'Test channel for messages',
+      isPrivate: false,
+      createdById: testState.testData.users[0].id,
+      organizationId: testState.testData.orgA.id,
+    },
+  });
+  testState.channelId = channel.id;
+
+  const otherChannel = await prisma.channel.create({
+    data: {
+      name: 'fixture-other-channel',
+      description: 'Another channel',
+      isPrivate: false,
+      createdById: testState.testData.users[0].id,
+      organizationId: testState.testData.orgA.id,
+    },
+  });
+  testState.otherChannelId = otherChannel.id;
+
+  // Add members to fixture channels
+  await prisma.channelMember.createMany({
+    data: [
+      { channelId: testState.channelId, userId: testState.testData.users[0].id, organizationId: testState.testData.orgA.id },
+      { channelId: testState.channelId, userId: testState.testData.users[1].id, organizationId: testState.testData.orgA.id },
+      { channelId: testState.otherChannelId, userId: testState.testData.users[0].id, organizationId: testState.testData.orgA.id },
+    ],
+  });
+
+  // Return teardown function
+  return async function globalTeardown() {
+    if (prisma) {
+      await prisma.$disconnect();
+    }
+  };
+}
+
+// Clean only truly temporary test data (run once at start)
+async function cleanGlobalTestData(prisma: PrismaClient) {
+  const testOrgs = await prisma.organization.findMany({
+    where: { kraPin: { in: ['A001234567A', 'B001234567B'] } },
+    select: { id: true },
+  });
+  const testOrgIds = testOrgs.map(o => o.id);
+
+  if (testOrgIds.length === 0) return;
+
+  // Delete all test data for these orgs
+  const channels = await prisma.channel.findMany({
+    where: { organizationId: { in: testOrgIds } },
+    select: { id: true },
+  });
+  const channelIds = channels.map(c => c.id);
+
+  const users = await prisma.user.findMany({
+    where: { email: { contains: '@orga.com' } },
+    select: { id: true },
+  });
+  const orgAUserIds = users.map(u => u.id);
+
+  const orgBUsers = await prisma.user.findMany({
+    where: { email: { contains: '@orgb.com' } },
+    select: { id: true },
+  });
+  const orgBUserIds = orgBUsers.map(u => u.id);
+
+  const allTestUserIds = [...orgAUserIds, ...orgBUserIds];
+
+  await prisma.reaction.deleteMany({ where: { message: { channelId: { in: channelIds } } } });
+  await prisma.readCursor.deleteMany({ where: { OR: [{ channelId: { in: channelIds } }, { recipientId: { in: allTestUserIds } }] } });
+  await prisma.notification.deleteMany({ where: { userId: { in: orgAUserIds } } });
+  await prisma.presenceSession.deleteMany({ where: { userId: { in: orgAUserIds } } });
+  await prisma.meetingParticipant.deleteMany({ where: { meeting: { channelId: { in: channelIds } } } });
+  await prisma.meeting.deleteMany({ where: { channelId: { in: channelIds } } });
+  await prisma.message.deleteMany({ where: { OR: [{ channelId: { in: channelIds } }, { senderId: { in: allTestUserIds } }] } });
+  await prisma.channelMember.deleteMany({ where: { channelId: { in: channelIds } } });
+  await prisma.channel.deleteMany({ where: { id: { in: channelIds } } });
+  await prisma.conversation.deleteMany({ where: { createdById: { in: allTestUserIds } } });
+  await prisma.conversationParticipant.deleteMany({ where: { userId: { in: allTestUserIds } } });
+  // Delete file attachments for all messages by test users (not just channel messages)
+  await prisma.fileAttachment.deleteMany({ where: { message: { senderId: { in: allTestUserIds } } } });
+  await prisma.fileAttachment.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.sharedNote.deleteMany({ where: { authorId: { in: orgAUserIds } } });
+  await prisma.notificationPreference.deleteMany({ where: { userId: { in: orgAUserIds } } });
+  await prisma.user.deleteMany({ where: { email: { contains: '@orga.com' } } });
+  await prisma.user.deleteMany({ where: { email: { contains: '@orgb.com' } } });
+  await prisma.branch.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.organization.deleteMany({ where: { kraPin: { in: ['A001234567A', 'B001234567B'] } } });
+}
+
+// Seed base test data (run once globally)
+async function seedGlobalTestData(prisma: PrismaClient) {
+  const bcrypt = await import('bcryptjs');
+  const passwordHash = await bcrypt.hash('TestPass123!', 12);
+
+  const orgA = await prisma.organization.upsert({
+    where: { kraPin: 'A001234567A' },
+    update: {},
+    create: { legalName: 'Test Org A', tradeName: 'Org A', kraPin: 'A001234567A', vatNumber: 'VAT001' },
+  });
+
+  const orgB = await prisma.organization.upsert({
+    where: { kraPin: 'B001234567B' },
+    update: {},
+    create: { legalName: 'Test Org B', tradeName: 'Org B', kraPin: 'B001234567B', vatNumber: 'VAT002' },
+  });
+
+  const branchA = await prisma.branch.upsert({
+    where: { organizationId_branchCode: { organizationId: orgA.id, branchCode: '00' } },
+    update: {},
+    create: { organizationId: orgA.id, branchCode: '00', name: 'HQ', isHq: true },
+  });
+
+  const branchB = await prisma.branch.upsert({
+    where: { organizationId_branchCode: { organizationId: orgB.id, branchCode: '00' } },
+    update: {},
+    create: { organizationId: orgB.id, branchCode: '00', name: 'HQ', isHq: true },
+  });
+
+  const users = await Promise.all([
+    prisma.user.upsert({
+      where: { email: 'admin@orga.com' },
+      update: { organizationId: orgA.id, branchId: branchA.id, fullName: 'Admin User A', role: 'SUPER_ADMIN', isActive: true },
+      create: { organizationId: orgA.id, branchId: branchA.id, email: 'admin@orga.com', passwordHash, fullName: 'Admin User A', role: 'SUPER_ADMIN', isActive: true }
+    }),
+    prisma.user.upsert({
+      where: { email: 'member@orga.com' },
+      update: { organizationId: orgA.id, branchId: branchA.id, fullName: 'Member User A', role: 'EMPLOYEE', isActive: true },
+      create: { organizationId: orgA.id, branchId: branchA.id, email: 'member@orga.com', passwordHash, fullName: 'Member User A', role: 'EMPLOYEE', isActive: true }
+    }),
+    prisma.user.upsert({
+      where: { email: 'admin@orgb.com' },
+      update: { organizationId: orgB.id, branchId: branchB.id, fullName: 'Admin User B', role: 'ADMIN', isActive: true },
+      create: { organizationId: orgB.id, branchId: branchB.id, email: 'admin@orgb.com', passwordHash, fullName: 'Admin User B', role: 'ADMIN', isActive: true }
+    }),
+    prisma.user.upsert({
+      where: { email: 'finance@orga.com' },
+      update: { organizationId: orgA.id, branchId: branchA.id, fullName: 'Finance User A', role: 'FINANCE_MANAGER', isActive: true },
+      create: { organizationId: orgA.id, branchId: branchA.id, email: 'finance@orga.com', passwordHash, fullName: 'Finance User A', role: 'FINANCE_MANAGER', isActive: true }
+    }),
+  ]);
+
+  return { orgA, orgB, branchA, branchB, users };
+}

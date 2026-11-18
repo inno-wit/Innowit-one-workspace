@@ -1,4 +1,5 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -7,6 +8,7 @@ import dotenv from 'dotenv';
 
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { prisma } from './prisma';
+import { initializeRealtimeGateway } from './services/realtime/RealtimeGateway';
 
 // Load environment variables
 dotenv.config();
@@ -128,6 +130,10 @@ import employeeRoutes from './routes/employees';
 import payrollRoutes from './routes/payroll';
 import channelRoutes from './routes/channels';
 import messageRoutes from './routes/messages';
+import conversationRoutes from './routes/conversations';
+import notificationRoutes from './routes/notifications';
+import attachmentRoutes from './routes/attachments';
+import meetingRoutes from './routes/meetings';
 import auditRoutes from './routes/audit';
 import importWizardRoutes from './routes/importWizard';
 
@@ -156,6 +162,10 @@ apiRouter.use('/employees', employeeRoutes);
 apiRouter.use('/payroll', payrollRoutes);
 apiRouter.use('/channels', channelRoutes);
 apiRouter.use('/messages', messageRoutes);
+apiRouter.use('/conversations', conversationRoutes);
+apiRouter.use('/notifications', notificationRoutes);
+apiRouter.use('/attachments', attachmentRoutes);
+apiRouter.use('/meetings', meetingRoutes);
 apiRouter.use('/audit', auditRoutes);
 apiRouter.use('/import-wizard', importWizardRoutes);
 
@@ -167,9 +177,17 @@ app.use(notFoundHandler);
 // Error handler
 app.use(errorHandler);
 
+// Create HTTP server
+const httpServer = createServer(app);
+
+// Initialize Socket.IO
+const realtimeGateway = initializeRealtimeGateway(httpServer);
+console.log('🔌 Socket.IO server initialized');
+
 // Graceful shutdown
 async function shutdown() {
   console.log('Shutting down gracefully...');
+  realtimeGateway.getIO().close();
   await prisma.$disconnect();
   process.exit(0);
 }
@@ -178,7 +196,7 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 // Start server
-const server = app.listen(PORT, HOST, () => {
+httpServer.listen(PORT, HOST, () => {
   console.log(`🚀 Innowit One API server running on http://${HOST}:${PORT}`);
   console.log(`   Health: http://${HOST}:${PORT}/health`);
   console.log(`   Ready:  http://${HOST}:${PORT}/ready`);

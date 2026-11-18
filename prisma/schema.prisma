@@ -154,6 +154,14 @@ model Organization {
   channelMembers   ChannelMember[]
   messages         Message[]
   fileAttachments  FileAttachment[]
+  reactions        Reaction[]
+  readCursors      ReadCursor[]
+  notifications    Notification[]
+  presenceSessions PresenceSession[]
+  meetings         Meeting[]
+  conversations    Conversation[]
+  sharedNotes      SharedNote[]
+  notificationPreferences NotificationPreference[]
 }
 
 model Branch {
@@ -172,6 +180,7 @@ model Branch {
   warehouses       Warehouse[]
   invoices         SalesInvoice[]
   purchaseOrders   PurchaseOrder[]
+  channels         Channel[]
 
   @@unique([organizationId, branchCode])
 }
@@ -198,6 +207,16 @@ model User {
   messages         Message[]
   channelMemberships ChannelMember[]
   refreshTokens    RefreshToken[]
+  reactions        Reaction[]
+  readCursors      ReadCursor[]
+  notifications    Notification[]
+  presenceSessions PresenceSession[]
+  meetings         Meeting[]        @relation("MeetingStartedBy")
+  meetingParticipations MeetingParticipant[]
+  conversations    ConversationParticipant[]
+  createdConversations Conversation[] @relation("CreatedConversations")
+  sharedNotes      SharedNote[]
+  notificationPreference NotificationPreference?
 
   @@index([organizationId])
   @@index([branchId])
@@ -233,10 +252,21 @@ model Channel {
   isPrivate        Boolean        @default(false)
   createdById      String
   createdAt        DateTime       @default(now())
+  topic            String?
+  isArchived       Boolean        @default(false)
+  archivedAt       DateTime?
+  branchId         String?
 
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch           Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
   members          ChannelMember[]
   messages         Message[]
+  meetings         Meeting[]
+  sharedNotes      SharedNote[]
+  readCursors      ReadCursor[]
+
+  @@index([organizationId, isArchived])
+  @@index([branchId])
 }
 
 model ChannelMember {
@@ -257,20 +287,38 @@ model Message {
   id               String         @id @default(uuid())
   organizationId   String         // audit fix SC-23: tenant scoping
   channelId        String?
+  conversationId   String?
   senderId         String
-  recipientId      String?        // Populated for Direct Messages
+  recipientId      String?        // Populated for Direct Messages (1:1)
   parentId         String?        // Populated for Thread replies
+  threadRootId     String?        // Root of thread for flat queries
   content          String
   isPinned         Boolean        @default(false)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
+  editedAt         DateTime?
+  editedById       String?
+  deletedAt        DateTime?      // Soft delete tombstone
+  deletedById      String?
+  idempotencyKey   String?        @unique // Client-generated for deduplication
 
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  channel          Channel?       @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  sender           User           @relation(fields: [senderId], references: [id], onDelete: Restrict)
-  parent           Message?       @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies          Message[]      @relation("ThreadReplies")
+  organization     Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  channel          Channel?               @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation     Conversation?          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender           User                   @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  parent           Message?               @relation("ThreadReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies          Message[]              @relation("ThreadReplies")
   attachments      FileAttachment[]
+  reactions        Reaction[]
+  readCursors      ReadCursor[]
+
+  @@index([organizationId, channelId, createdAt])
+  @@index([organizationId, recipientId, createdAt])
+  @@index([conversationId])
+  @@index([threadRootId])
+  @@index([parentId])
+  @@index([idempotencyKey, senderId, channelId])
+  @@index([idempotencyKey, senderId, recipientId])
 }
 
 model FileAttachment {
@@ -282,9 +330,280 @@ model FileAttachment {
   mimeType         String
   storagePath      String
   uploadedAt       DateTime       @default(now())
+  uploadStatus     UploadStatus   @default(COMPLETED)
+  checksum         String?
+  scannedAt        DateTime?
+  scanStatus       ScanStatus?
+  scanResultJson   String?        @db.Text
 
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   message          Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, uploadStatus])
+}
+
+enum UploadStatus {
+  PENDING
+  UPLOADING
+  COMPLETED
+  FAILED
+}
+
+enum ScanStatus {
+  CLEAN
+  INFECTED
+  PENDING
+  SKIPPED
+}
+
+// ============================================================================
+// PHASE 2: COLLABORATION EXTENSIONS
+// ============================================================================
+
+model Reaction {
+  id             String   @id @default(uuid())
+  organizationId String
+  messageId      String
+  userId         String
+  emoji          String
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  message        Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([organizationId])
+  @@index([messageId])
+  @@index([userId])
+}
+
+model ReadCursor {
+  id               String   @id @default(uuid())
+  organizationId   String
+  userId           String
+  channelId        String?
+  recipientId      String?  // For DMs
+  lastReadMessageId String?
+  lastReadAt       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel          Channel?     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  lastReadMessage  Message?     @relation(fields: [lastReadMessageId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, channelId])
+  @@unique([userId, recipientId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+model Notification {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String           // Recipient
+  type           NotificationType
+  title          String
+  body           String?
+  dataJson       String?          @db.Text // Flexible payload: { messageId, channelId, etc. }
+  isRead         Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  readAt         DateTime?
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId, isRead])
+  @@index([userId, createdAt])
+  @@index([organizationId])
+}
+
+enum NotificationType {
+  MENTION
+  DIRECT_MESSAGE
+  THREAD_REPLY
+  REACTION
+  CHANNEL_INVITE
+  MESSAGE_PINNED
+  HUDDLE_STARTED
+  FILE_SHARED
+  SYSTEM
+}
+
+model PresenceSession {
+  id             String           @id @default(uuid())
+  organizationId String
+  userId         String
+  socketId       String           @unique
+  status         PresenceStatus   @default(ONLINE)
+  lastHeartbeat  DateTime         @default(now())
+  metadataJson   String?          @db.Text // { device, platform, appVersion }
+  createdAt      DateTime         @default(now())
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId])
+  @@index([socketId])
+  @@index([lastHeartbeat])
+}
+
+enum PresenceStatus {
+  ONLINE
+  AWAY
+  OFFLINE
+}
+
+model Meeting {
+  id               String         @id @default(uuid())
+  organizationId   String
+  channelId        String?
+  title            String?
+  startedById      String
+  startedAt        DateTime       @default(now())
+  endedAt          DateTime?
+  status           MeetingStatus  @default(SCHEDULED)
+  meetingType      MeetingType    @default(GROUP)
+  metadataJson     String?        @db.Text // { sfuUrl, recordingUrl, etc. }
+
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  channel          Channel?           @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  startedBy        User               @relation("MeetingStartedBy", fields: [startedById], references: [id], onDelete: Restrict)
+  participants     MeetingParticipant[]
+
+  @@index([organizationId])
+  @@index([channelId])
+  @@index([startedById])
+  @@index([status])
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum MeetingType {
+  DIRECT
+  GROUP
+  CHANNEL
+}
+
+model MeetingParticipant {
+  id           String       @id @default(uuid())
+  meetingId    String
+  userId       String
+  joinedAt     DateTime     @default(now())
+  leftAt       DateTime?
+  role         MeetingRole  @default(PARTICIPANT)
+
+  meeting      Meeting      @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, userId])
+  @@index([meetingId])
+  @@index([userId])
+}
+
+enum MeetingRole {
+  HOST
+  CO_HOST
+  PARTICIPANT
+}
+
+model Conversation {
+  id           String   @id @default(uuid())
+  organizationId String
+  type         String   @default("DIRECT") // "DIRECT" | "GROUP"
+  title        String?  // For group DMs
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  directKey    String?  @unique // For DIRECT: orgId:min(participantA,participantB):max(participantA,participantB)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy    User       @relation("CreatedConversations", fields: [createdById], references: [id], onDelete: Restrict)
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([organizationId])
+  @@index([createdById])
+  @@index([directKey])
+}
+
+model ConversationParticipant {
+  id             String   @id @default(uuid())
+  conversationId String
+  userId         String
+  joinedAt       DateTime @default(now())
+  leftAt         DateTime?
+  role           String   @default("MEMBER") // "MEMBER" | "ADMIN"
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([conversationId])
+  @@index([userId])
+}
+
+model SharedNote {
+  id               String           @id @default(uuid())
+  organizationId   String
+  channelId        String?
+  title            String
+  content          String           @db.Text // Markdown
+  category         NoteCategory
+  authorId         String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  isPinned         Boolean          @default(false)
+  linkedEntityType LinkedEntityType?
+  linkedEntityId   String?
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  channel          Channel?         @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  author           User             @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([channelId])
+  @@index([authorId])
+}
+
+enum NoteCategory {
+  FINANCE
+  SALES
+  COMPLIANCE
+  ENGINEERING
+  GENERAL
+}
+
+enum LinkedEntityType {
+  CUSTOMER
+  DEAL
+  INVOICE
+  PROJECT
+}
+
+model NotificationPreference {
+  id              String   @id @default(uuid())
+  organizationId  String
+  userId          String   @unique
+  desktopEnabled  Boolean  @default(true)
+  previewEnabled  Boolean  @default(false)
+  quietHoursStart String?
+  quietHoursEnd   String?
+  mutedChannels   String[] @default([])
+  mutedUsers      String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
 
 // ============================================================================

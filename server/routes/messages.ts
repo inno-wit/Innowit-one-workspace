@@ -1,24 +1,26 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { prisma } from '../prisma';
-import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
+import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { collaborationService } from '../services/collaboration/CollaborationService';
+import { notificationService } from '../services/collaboration/NotificationService';
 
 const router = Router();
 
 const createMessageSchema = z.object({
   channelId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().optional(),
   recipientId: z.string().uuid().optional(),
   parentId: z.string().uuid().optional(),
-  content: z.string().min(1, 'Content is required'),
-}).refine(data => data.channelId || data.recipientId, {
-  message: 'Either channelId or recipientId is required',
+  content: z.string().min(1, 'Content is required').max(10000),
+  idempotencyKey: z.string().uuid('Invalid idempotency key'),
+}).refine(data => data.channelId || data.conversationId || data.recipientId, {
+  message: 'Either channelId, conversationId, or recipientId is required',
 });
 
 const updateMessageSchema = z.object({
-  content: z.string().min(1, 'Content is required'),
-  isPinned: z.boolean().optional(),
+  content: z.string().min(1, 'Content is required').max(10000),
 });
 
 const messageParamsSchema = z.object({
@@ -26,235 +28,155 @@ const messageParamsSchema = z.object({
 });
 
 const listQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
+  cursor: z.string().optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
+  direction: z.enum(['before', 'after']).default('before'),
   channelId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().optional(),
   recipientId: z.string().uuid().optional(),
 });
 
-// GET /api/messages
+const reactionSchema = z.object({
+  emoji: z.string().min(1).max(10),
+});
+
+const threadQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+
+const searchQuerySchema = z.object({
+  q: z.string().min(2, 'Query must be at least 2 characters'),
+  channelId: z.string().uuid().optional(),
+  conversationId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().positive().max(50).default(20),
+});
+
+// GET /api/messages - List messages with cursor pagination
 router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { page, limit, channelId, recipientId } = req.query as any;
-  const skip = (page - 1) * limit;
+  const { cursor, limit, direction, channelId, conversationId, recipientId } = req.query as any;
 
-  const where: any = {};
-
-  if (channelId) {
-    // Check if user is member of channel
-    const membership = await prisma.channelMember.findUnique({
-      where: { channelId_userId: { channelId, userId: req.user!.userId } },
-    });
-
-    if (!membership) {
-      const channel = await prisma.channel.findUnique({
-        where: { id: channelId },
-      });
-
-      if (!channel || channel.isPrivate) {
-        throw new AppError(403, 'FORBIDDEN', 'Not a member of this channel');
-      }
-    }
-
-    where.channelId = channelId;
-  } else if (recipientId) {
-    // Direct messages - user is either sender or recipient
-    where.OR = [
-      { senderId: req.user!.userId, recipientId },
-      { senderId: recipientId, recipientId: req.user!.userId },
-    ];
-    where.channelId = null;
-  } else {
-    // All messages user has access to
-    where.OR = [
-      { senderId: req.user!.userId },
-      { recipientId: req.user!.userId },
-      { channel: { members: { some: { userId: req.user!.userId } } } },
-    ];
-  }
-
-  const [messages, total] = await Promise.all([
-    prisma.message.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-        channel: { select: { id: true, name: true } },
-        parent: {
-          select: { id: true, content: true, sender: { select: { id: true, fullName: true } } },
-        },
-        _count: { select: { replies: true, attachments: true } },
-      },
-    }),
-    prisma.message.count({ where }),
-  ]);
+  const result = await collaborationService.listMessages(
+    req.user!.userId,
+    req.user!.organizationId,
+    { channelId, conversationId, recipientId, cursor, limit, direction }
+  );
 
   res.json({
-    data: messages,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    data: result.data,
+    pagination: { cursor: result.nextCursor, limit, hasMore: result.hasMore },
   });
+}));
+
+// GET /api/messages/search
+router.get('/search', authenticateToken, validateQuery(searchQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { q, channelId, conversationId, limit } = req.query as any;
+  const messages = await collaborationService.searchMessages(q, req.user!.userId, req.user!.organizationId, { channelId, conversationId, limit });
+  res.json({ data: messages });
 }));
 
 // GET /api/messages/:id
 router.get('/:id', authenticateToken, validateParams(messageParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-
-  const message = await prisma.message.findUnique({
-    where: { id },
-    include: {
-      sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      channel: { select: { id: true, name: true } },
-      parent: {
-        select: { id: true, content: true, sender: { select: { id: true, fullName: true } } },
-      },
-      replies: {
-        include: {
-          sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-        },
-        orderBy: { createdAt: 'asc' },
-      },
-      attachments: true,
-    },
-  });
-
-  if (!message) {
-    throw new AppError(404, 'NOT_FOUND', 'Message not found');
-  }
-
-  // Check access
-  const hasAccess = 
-    message.senderId === req.user!.userId ||
-    message.recipientId === req.user!.userId ||
-    (message.channelId && await prisma.channelMember.findUnique({
-      where: { channelId_userId: { channelId: message.channelId, userId: req.user!.userId } },
-    }));
-
-  if (!hasAccess) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
+  const message = await collaborationService.getMessage(id, req.user!.userId, req.user!.organizationId);
   res.json({ data: message });
 }));
 
-// POST /api/messages
+// POST /api/messages - Send message
 router.post('/', authenticateToken, validateBody(createMessageSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const data = req.body;
 
-  // Verify channel access if posting to channel
+  const result = await collaborationService.sendMessage(
+    {
+      channelId: data.channelId,
+      conversationId: data.conversationId,
+      recipientId: data.recipientId,
+      content: data.content,
+      parentId: data.parentId,
+      idempotencyKey: data.idempotencyKey,
+    },
+    req.user!.userId,
+    req.user!.organizationId
+  );
+
+  if (result._existing) {
+    return res.status(200).json({ data: result, existing: true });
+  }
+
+  // Create notifications for mentions
   if (data.channelId) {
-    const membership = await prisma.channelMember.findUnique({
-      where: { channelId_userId: { channelId: data.channelId, userId: req.user!.userId } },
-    });
-
-    if (!membership) {
-      const channel = await prisma.channel.findUnique({
-        where: { id: data.channelId },
-      });
-
-      if (!channel || channel.isPrivate) {
-        throw new AppError(403, 'FORBIDDEN', 'Not a member of this channel');
+    const channel = await collaborationService.getChannel(data.channelId, req.user!.userId, req.user!.organizationId);
+    if (channel) {
+      const memberIds = channel.members?.map(m => m.userId) || [];
+      const mentionRegex = /@(\w+)/g;
+      const mentions = data.content.match(mentionRegex) || [];
+      if (mentions.length > 0) {
+        // Simplified: would resolve @name to userId in production
+        // For now, skip detailed mention handling
       }
     }
   }
 
-  // Verify recipient if DM
-  if (data.recipientId) {
-    const recipient = await prisma.user.findUnique({
-      where: { id: data.recipientId },
-    });
-
-    if (!recipient || recipient.organizationId !== req.user!.organizationId) {
-      throw new AppError(404, 'NOT_FOUND', 'Recipient not found');
-    }
-  }
-
-  // Verify parent message if replying
-  if (data.parentId) {
-    const parent = await prisma.message.findUnique({
-      where: { id: data.parentId },
-    });
-
-    if (!parent) {
-      throw new AppError(404, 'NOT_FOUND', 'Parent message not found');
-    }
-
-    // Check access to parent
-    const hasAccess = 
-      parent.senderId === req.user!.userId ||
-      parent.recipientId === req.user!.userId ||
-      (parent.channelId && await prisma.channelMember.findUnique({
-        where: { channelId_userId: { channelId: parent.channelId, userId: req.user!.userId } },
-      }));
-
-    if (!hasAccess) {
-      throw new AppError(403, 'FORBIDDEN', 'Cannot reply to this message');
-    }
-  }
-
-  const message = await prisma.message.create({
-    data: {
-      ...data,
-      senderId: req.user!.userId,
-      organizationId: req.user!.organizationId,
-    },
-    include: {
-      sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      channel: { select: { id: true, name: true } },
-    },
-  });
-
-  res.status(201).json({ data: message });
+  res.status(201).json({ data: result, existing: false });
 }));
 
-// PUT /api/messages/:id
+// PUT /api/messages/:id - Edit message
 router.put('/:id', authenticateToken, validateParams(messageParamsSchema), validateBody(updateMessageSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-
-  const message = await prisma.message.findUnique({
-    where: { id },
-  });
-
-  if (!message) {
-    throw new AppError(404, 'NOT_FOUND', 'Message not found');
-  }
-
-  // Only sender can edit
-  if (message.senderId !== req.user!.userId && req.user!.role !== 'SUPER_ADMIN' && req.user!.role !== 'ADMIN') {
-    throw new AppError(403, 'FORBIDDEN', 'Can only edit own messages');
-  }
-
-  const updatedMessage = await prisma.message.update({
-    where: { id },
-    data: req.body,
-    include: {
-      sender: { select: { id: true, fullName: true, email: true, avatarUrl: true } },
-      channel: { select: { id: true, name: true } },
-    },
-  });
-
-  res.json({ data: updatedMessage });
+  const updated = await collaborationService.editMessage(id, req.body.content, req.user!.userId, req.user!.organizationId, req.user!.role);
+  res.json({ data: updated });
 }));
 
-// DELETE /api/messages/:id
+// DELETE /api/messages/:id - Delete message (soft delete by default)
 router.delete('/:id', authenticateToken, validateParams(messageParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-
-  const message = await prisma.message.findUnique({
-    where: { id },
-  });
-
-  if (!message) {
-    throw new AppError(404, 'NOT_FOUND', 'Message not found');
-  }
-
-  // Sender or admin can delete
-  if (message.senderId !== req.user!.userId && req.user!.role !== 'SUPER_ADMIN' && req.user!.role !== 'ADMIN') {
-    throw new AppError(403, 'FORBIDDEN', 'Can only delete own messages');
-  }
-
-  await prisma.message.delete({ where: { id } });
+  const hard = req.query.hard === 'true';
+  await collaborationService.deleteMessage(id, req.user!.userId, req.user!.organizationId, req.user!.role, hard);
   res.json({ message: 'Message deleted successfully' });
+}));
+
+// POST /api/messages/:id/pin - Pin message
+router.post('/:id/pin', authenticateToken, validateParams(messageParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const updated = await collaborationService.pinMessage(id, req.user!.userId, req.user!.organizationId, req.user!.role);
+  res.json({ data: updated });
+}));
+
+// DELETE /api/messages/:id/pin - Unpin message
+router.delete('/:id/pin', authenticateToken, validateParams(messageParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const updated = await collaborationService.unpinMessage(id, req.user!.userId, req.user!.organizationId, req.user!.role);
+  res.json({ data: updated });
+}));
+
+// Reactions
+router.post('/:id/reactions', authenticateToken, validateParams(messageParamsSchema), validateBody(reactionSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { emoji } = req.body;
+  const reaction = await collaborationService.addReaction(id, emoji, req.user!.userId, req.user!.organizationId);
+  res.status(201).json({ data: reaction });
+}));
+
+router.delete('/:id/reactions/:emoji', authenticateToken, validateParams(z.object({
+  id: z.string().uuid(),
+  emoji: z.string(),
+})), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id, emoji } = req.params;
+  const reaction = await collaborationService.removeReaction(id, emoji, req.user!.userId, req.user!.organizationId);
+  res.json({ data: reaction });
+}));
+
+router.get('/:id/reactions', authenticateToken, validateParams(messageParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const reactions = await collaborationService.getReactions(id, req.user!.userId, req.user!.organizationId);
+  res.json({ data: reactions });
+}));
+
+// Threads
+router.get('/:id/thread', authenticateToken, validateParams(messageParamsSchema), validateQuery(threadQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const result = await collaborationService.getThread(id, req.user!.userId, req.user!.organizationId);
+  res.json({ data: result });
 }));
 
 export default router;
