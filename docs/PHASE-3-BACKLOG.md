@@ -3,7 +3,7 @@
 **Document Version:** 1.1.0  
 **Date:** 2026-11-19  
 **Status:** As-Built / Post-Release  
-**Final Commit:** `673ebaf178ed80f9af406f019cdcd847f809a8a5`  
+**Final Commit:** `32c48ec022b407d5902bc52818701461d1b688d1`  
 
 ---
 
