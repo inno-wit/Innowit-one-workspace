@@ -136,6 +136,9 @@ import attachmentRoutes from './routes/attachments';
 import meetingRoutes from './routes/meetings';
 import auditRoutes from './routes/audit';
 import importWizardRoutes from './routes/importWizard';
+import salesRepRoutes from './routes/salesReps';
+import crmAnalyticsRoutes from './routes/crmAnalytics';
+import crmPremiumRoutes from './routes/crmPremium';
 
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/organizations', organizationRoutes);
@@ -168,6 +171,9 @@ apiRouter.use('/attachments', attachmentRoutes);
 apiRouter.use('/meetings', meetingRoutes);
 apiRouter.use('/audit', auditRoutes);
 apiRouter.use('/import-wizard', importWizardRoutes);
+apiRouter.use('/sales-reps', salesRepRoutes);
+apiRouter.use('/crm/analytics', crmAnalyticsRoutes);
+apiRouter.use('/crm/premium', crmPremiumRoutes);
 
 app.use('/api', apiRouter);
 

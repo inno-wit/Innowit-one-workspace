@@ -14,8 +14,11 @@ const createTaskSchema = z.object({
   status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']).default('PENDING'),
   dueDate: z.string().datetime().optional().nullable(),
   assignedToId: z.string().uuid('Invalid assignee ID'),
-  customerId: z.string().uuid().optional(),
-  dealId: z.string().uuid().optional(),
+  customerId: z.string().uuid().optional().nullable(),
+  dealId: z.string().uuid().optional().nullable(),
+  projectId: z.string().uuid().optional().nullable(),
+  salesOrderId: z.string().uuid().optional().nullable(),
+  reminderAt: z.string().datetime().optional().nullable(),
 });
 
 const updateTaskSchema = createTaskSchema.partial();
@@ -33,12 +36,16 @@ const listQuerySchema = z.object({
   assignedToId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
   dealId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  salesOrderId: z.string().uuid().optional(),
   overdue: z.coerce.boolean().optional(),
+  dueBefore: z.string().datetime().optional(),
+  dueAfter: z.string().datetime().optional(),
 });
 
 // GET /api/tasks
 router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { page, limit, search, status, priority, assignedToId, customerId, dealId, overdue } = req.query as any;
+  const { page, limit, search, status, priority, assignedToId, customerId, dealId, projectId, salesOrderId, overdue, dueBefore, dueAfter } = req.query as any;
   const skip = (page - 1) * limit;
 
   const where: any = {};
@@ -53,12 +60,21 @@ router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(
 
   if (customerId) where.customerId = customerId;
   if (dealId) where.dealId = dealId;
+  if (projectId) where.projectId = projectId;
+  if (salesOrderId) where.salesOrderId = salesOrderId;
   if (status) where.status = status;
   if (priority) where.priority = priority;
 
   if (overdue) {
     where.dueDate = { lt: new Date() };
     where.status = { not: 'COMPLETED' };
+  }
+
+  if (dueBefore) {
+    where.dueDate = { ...where.dueDate, lte: new Date(dueBefore) };
+  }
+  if (dueAfter) {
+    where.dueDate = { ...where.dueDate, gte: new Date(dueAfter) };
   }
 
   if (search) {
@@ -69,8 +85,8 @@ router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(
   }
 
   // Ensure customer/deal belongs to organization
-  if (customerId || dealId) {
-    // This is handled by the where clause above
+  if (customerId || dealId || projectId || salesOrderId) {
+    // Filtered by specific entity - already scoped
   } else {
     // For general task list, filter by organization through customer or deal
     where.OR = [

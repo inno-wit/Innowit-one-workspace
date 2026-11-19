@@ -13,10 +13,13 @@ const createDealSchema = z.object({
   title: z.string().min(1, 'Title is required').max(255),
   value: z.number().nonnegative('Value must be non-negative'),
   currency: z.enum(['KES', 'USD', 'EUR', 'GBP']).default('KES'),
-  stage: z.enum(['NEW_LEAD', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION', 'CLOSED_WON', 'CLOSED_LOST']).default('NEW_LEAD'),
+  stage: z.enum(['NEW_LEAD', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION', 'CLOSED']).default('NEW_LEAD'),
+  closeOutcome: z.enum(['WON', 'LOST']).optional(),
   winProbability: z.number().int().min(0).max(100).default(20),
   expectedCloseDate: z.string().datetime().optional().nullable(),
   lostReason: z.string().optional(),
+  lostNotes: z.string().optional(),
+  source: z.string().optional(),
 });
 
 const updateDealSchema = createDealSchema.partial();
@@ -29,14 +32,16 @@ const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
   search: z.string().optional(),
-  stage: z.enum(['NEW_LEAD', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION', 'CLOSED_WON', 'CLOSED_LOST']).optional(),
+  stage: z.enum(['NEW_LEAD', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION', 'CLOSED']).optional(),
+  closeOutcome: z.enum(['WON', 'LOST']).optional(),
   assignedToId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
+  branchId: z.string().uuid().optional(),
 });
 
 // GET /api/deals
 router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { page, limit, search, stage, assignedToId, customerId } = req.query as any;
+  const { page, limit, search, stage, closeOutcome, assignedToId, customerId, branchId } = req.query as any;
   const skip = (page - 1) * limit;
 
   const where: any = {
@@ -53,6 +58,8 @@ router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(
 
   if (customerId) where.customerId = customerId;
   if (stage) where.stage = stage;
+  if (closeOutcome) where.closeOutcome = closeOutcome;
+  if (branchId) where.customer = { ...where.customer, branchId };
 
   if (search) {
     where.OR = [
@@ -70,7 +77,7 @@ router.get('/', authenticateToken, validateQuery(listQuerySchema), asyncHandler(
       include: {
         customer: { select: { id: true, name: true, customerCode: true } },
         assignedTo: { select: { id: true, fullName: true, email: true } },
-        _count: { select: { tasks: true, quotations: true } },
+        _count: { select: { tasks: true, quotations: true, stageHistory: true } },
       },
     }),
     prisma.deal.count({ where }),

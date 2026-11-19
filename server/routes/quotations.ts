@@ -347,6 +347,125 @@ router.post('/:id/convert-to-order', authenticateToken, authorize('SUPER_ADMIN',
   res.status(201).json({ data: order, message: 'Sales order created from quotation' });
 }));
 
+// POST /api/deals/:dealId/generate-quotation - Generate quotation from won deal
+const generateQuotationSchema = z.object({
+  quotationNumber: z.string().min(1, 'Quotation number is required').max(50),
+  validUntil: z.string().datetime(),
+  items: z.array(quotationItemSchema).min(1, 'At least one item required'),
+});
+
+router.post('/from-deal/:dealId', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER', 'SALES_REP'), validateParams(z.object({ dealId: z.string().uuid() })), validateBody(generateQuotationSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { dealId } = req.params;
+  const { quotationNumber, validUntil, items } = req.body;
+
+  // Verify deal exists and is won
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: { customer: true, assignedTo: true },
+  });
+
+  if (!deal) {
+    throw new AppError(404, 'NOT_FOUND', 'Deal not found');
+  }
+
+  if (deal.customer.organizationId !== req.user!.organizationId) {
+    throw new AppError(403, 'FORBIDDEN', 'Access denied');
+  }
+
+  if (deal.stage !== 'CLOSED' || deal.closeOutcome !== 'WON') {
+    throw new AppError(400, 'DEAL_NOT_WON', 'Can only generate quotation for Closed Won deals');
+  }
+
+  const crossBranchRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'SALES_MANAGER', 'FINANCE_MANAGER'];
+  if (!crossBranchRoles.includes(req.user!.role) && deal.assignedToId !== req.user!.userId) {
+    throw new AppError(403, 'FORBIDDEN', 'Access denied');
+  }
+
+  // Check if quotation already exists for this deal
+  const existingQuotation = await prisma.quotation.findUnique({
+    where: { dealId },
+  });
+
+  if (existingQuotation) {
+    throw new AppError(409, 'QUOTATION_EXISTS', 'Quotation already exists for this deal');
+  }
+
+  // Verify products
+  const productIds = items.map((item: any) => item.productId);
+  const products = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+  });
+
+  if (products.length !== productIds.length) {
+    throw new AppError(400, 'INVALID_PRODUCT', 'One or more products not found');
+  }
+
+  const invalidOrg = products.some(p => p.organizationId !== req.user!.organizationId);
+  if (invalidOrg) {
+    throw new AppError(403, 'FORBIDDEN', 'Product belongs to different organization');
+  }
+
+  // Check quotation number uniqueness
+  const existing = await prisma.quotation.findUnique({
+    where: { organizationId_quotationNumber: { organizationId: req.user!.organizationId, quotationNumber } },
+  });
+
+  if (existing) {
+    throw new AppError(409, 'DUPLICATE_QUOTATION_NUMBER', 'Quotation number already exists in this organization');
+  }
+
+  const quotation = await prisma.$transaction(async (tx) => {
+    const newQuotation = await tx.quotation.create({
+      data: {
+        organizationId: req.user!.organizationId,
+        dealId,
+        quotationNumber,
+        validUntil: new Date(validUntil),
+        totalAmount: items.reduce((sum: number, item: any) => sum + item.quantity * item.unitPrice * (1 + item.taxRate / 100), 0),
+        items: {
+          create: items.map((item: any) => ({
+            productId: item.productId,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            taxRate: item.taxRate,
+          })),
+        },
+      },
+      include: {
+        deal: { select: { id: true, title: true, customer: { select: { id: true, name: true } } } },
+        items: {
+          include: { product: { select: { id: true, sku: true, name: true } } },
+        },
+      },
+    });
+
+    // Create activity log
+    await tx.cRMActivity.create({
+      data: {
+        organizationId: req.user!.organizationId,
+        customerId: deal.customerId,
+        dealId: dealId,
+        type: 'QUOTATION_GENERATED',
+        title: 'Quotation Generated from Won Deal',
+        description: `Generated quotation ${quotationNumber} for won deal "${deal.title}".`,
+        actorId: req.user!.userId,
+        occurredAt: new Date(),
+      },
+    });
+
+    // Update deal with quotation number
+    await tx.deal.update({
+      where: { id: dealId },
+      data: { wonQuotationNumber: quotationNumber },
+    });
+
+    return newQuotation;
+  });
+
+  res.status(201).json({ data: quotation, message: 'Quotation generated from won deal' });
+}));
+
 // DELETE /api/quotations/:id
 router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), validateParams(quotationParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;

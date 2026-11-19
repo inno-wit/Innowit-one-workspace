@@ -17,16 +17,25 @@ const router = Router();
 // Apply tenant isolation enforcement to all customer routes
 router.use(authenticateToken);
 
+// KRA PIN format validation regex: 1 capital letter, 9 digits, 1 capital letter
+const KRA_PIN_REGEX = /^[A-Z]\d{9}[A-Z]$/;
+
 const createCustomerSchema = z.object({
   customerCode: z.string().min(1, 'Customer code is required').max(50),
   name: z.string().min(1, 'Name is required').max(255),
   companyName: z.string().max(255).optional(),
-  kraPin: z.string().max(50).optional(),
+  kraPin: z.string().max(50).optional().refine(val => !val || KRA_PIN_REGEX.test(val), {
+    message: 'KRA PIN must be in format: 1 letter, 9 digits, 1 letter (e.g., P051234567Z)'
+  }),
   email: z.string().email().optional().or(z.literal('')),
   phone: z.string().optional(),
   billingAddress: z.string().optional(),
   creditLimit: z.number().nonnegative().default(0),
   paymentTermsDays: z.number().int().nonnegative().default(30),
+  lifecycle: z.enum(['LEAD', 'ACTIVE', 'INACTIVE']).default('LEAD'),
+  type: z.enum(['CORPORATE', 'INDIVIDUAL']).default('CORPORATE'),
+  branchId: z.string().uuid().optional().nullable(),
+  leadSource: z.string().optional(),
 });
 
 const updateCustomerSchema = createCustomerSchema.partial();
@@ -40,12 +49,16 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
   search: z.string().optional(),
   hasKraPin: z.coerce.boolean().optional(),
+  lifecycle: z.enum(['LEAD', 'ACTIVE', 'INACTIVE']).optional(),
+  type: z.enum(['CORPORATE', 'INDIVIDUAL']).optional(),
+  branchId: z.string().uuid().optional(),
+  ownerId: z.string().uuid().optional(),
 });
 
 // GET /api/customers
 router.get('/', validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const tenant = getTenantContext(req);
-  const { page, limit, search, hasKraPin } = req.query as any;
+  const { page, limit, search, hasKraPin, lifecycle, type, branchId, ownerId } = req.query as any;
   const skip = (page - 1) * limit;
 
   const where = orgWhereClause(tenant, {});
@@ -67,6 +80,16 @@ router.get('/', validateQuery(listQuerySchema), asyncHandler(async (req: Authent
     } else {
       where.kraPin = null;
     }
+  }
+
+  if (lifecycle) where.lifecycle = lifecycle;
+  if (type) where.type = type;
+  if (branchId) where.branchId = branchId;
+
+  // Non-managers can only see customers in their branch (if branch-scoped)
+  const managerRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'SALES_MANAGER'];
+  if (!managerRoles.includes(req.user!.role) && tenant.branchId) {
+    where.branchId = tenant.branchId;
   }
 
   const [customers, total] = await Promise.all([

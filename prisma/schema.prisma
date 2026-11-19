@@ -52,8 +52,39 @@ enum DealStage {
   QUALIFIED
   PROPOSAL
   NEGOTIATION
-  CLOSED_WON
-  CLOSED_LOST
+  CLOSED
+}
+
+enum DealCloseOutcome {
+  WON
+  LOST
+}
+
+enum CustomerLifecycle {
+  LEAD
+  ACTIVE
+  INACTIVE
+}
+
+enum CustomerType {
+  CORPORATE
+  INDIVIDUAL
+}
+
+enum CRMActivityType {
+  CALL
+  MEETING
+  NOTE
+  EMAIL_LOGGED
+  STAGE_CHANGE
+  TASK_CREATED
+  TASK_COMPLETED
+  CONTACT_ADDED
+  DEAL_CREATED
+  DEAL_WON
+  DEAL_LOST
+  DEAL_REOPENED
+  QUOTATION_GENERATED
 }
 
 enum TaskPriority {
@@ -128,40 +159,50 @@ enum TaxClassification {
 // ============================================================================
 
 model Organization {
-  id               String         @id @default(uuid())
-  legalName        String
-  tradeName        String?
-  kraPin           String         @unique
-  vatNumber        String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                        String         @id @default(uuid())
+  legalName                 String
+  tradeName                 String?
+  kraPin                    String         @unique
+  vatNumber                 String?
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
 
-  branches         Branch[]
-  users            User[]
-  etimsConfigs     EtimsConfiguration[]
-  accounts         Account[]
-  quotations       Quotation[]
-  salesOrders      SalesOrder[]
-  salesInvoices    SalesInvoice[]
-  customerPayments CustomerPayment[]
-  creditNotes      CreditNote[]
-  purchaseOrders   PurchaseOrder[]
-  suppliers        Supplier[]
-  departments      Department[]
-  employees        Employee[]
-  payrollRuns      PayrollRun[]
-  channels         Channel[]
-  channelMembers   ChannelMember[]
-  messages         Message[]
-  fileAttachments  FileAttachment[]
-  reactions        Reaction[]
-  readCursors      ReadCursor[]
-  notifications    Notification[]
-  presenceSessions PresenceSession[]
-  meetings         Meeting[]
-  conversations    Conversation[]
-  sharedNotes      SharedNote[]
-  notificationPreferences NotificationPreference[]
+  branches                  Branch[]
+  users                     User[]
+  etimsConfigs              EtimsConfiguration[]
+  accounts                  Account[]
+  quotations                Quotation[]
+  salesOrders               SalesOrder[]
+  salesInvoices             SalesInvoice[]
+  customerPayments          CustomerPayment[]
+  creditNotes               CreditNote[]
+  purchaseOrders            PurchaseOrder[]
+  suppliers                 Supplier[]
+  departments               Department[]
+  employees                 Employee[]
+  payrollRuns               PayrollRun[]
+  channels                  Channel[]
+  channelMembers            ChannelMember[]
+  messages                  Message[]
+  fileAttachments           FileAttachment[]
+  reactions                 Reaction[]
+  readCursors               ReadCursor[]
+  notifications             Notification[]
+  presenceSessions          PresenceSession[]
+  meetings                  Meeting[]
+  conversations             Conversation[]
+  sharedNotes               SharedNote[]
+  notificationPreferences   NotificationPreference[]
+  customers                 Customer[]
+  deals                     Deal[]
+  tasks                     Task[]
+  activities                CRMActivity[]
+  salesRepQuotas            SalesRepQuota[]
+  commissionRules           CommissionRule[]
+  commissionRecords         CommissionRecord[]
+  customFieldDefinitions    CustomFieldDefinition[]
+  customFieldValues         CustomFieldValue[]
+  savedViews                SavedView[]
 }
 
 model Branch {
@@ -181,42 +222,50 @@ model Branch {
   invoices         SalesInvoice[]
   purchaseOrders   PurchaseOrder[]
   channels         Channel[]
+  customers        Customer[]
 
   @@unique([organizationId, branchCode])
 }
 
 model User {
-  id               String         @id @default(uuid())
-  organizationId   String
-  branchId         String?
-  email            String         @unique
-  passwordHash     String
-  fullName         String
-  role             UserRole       @default(EMPLOYEE)
-  isActive         Boolean        @default(true)
-  avatarUrl        String?
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                        String         @id @default(uuid())
+  organizationId            String
+  branchId                  String?
+  email                     String         @unique
+  passwordHash              String
+  fullName                  String
+  role                      UserRole       @default(EMPLOYEE)
+  isActive                  Boolean        @default(true)
+  avatarUrl                 String?
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
 
-  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch           Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  employee         Employee?
-  assignedDeals    Deal[]
-  assignedTasks    Task[]
-  auditLogs        AuditLog[]
-  messages         Message[]
-  channelMemberships ChannelMember[]
-  refreshTokens    RefreshToken[]
-  reactions        Reaction[]
-  readCursors      ReadCursor[]
-  notifications    Notification[]
-  presenceSessions PresenceSession[]
-  meetings         Meeting[]        @relation("MeetingStartedBy")
-  meetingParticipations MeetingParticipant[]
-  conversations    ConversationParticipant[]
-  createdConversations Conversation[] @relation("CreatedConversations")
-  sharedNotes      SharedNote[]
-  notificationPreference NotificationPreference?
+  organization              Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch                    Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  employee                  Employee?
+  assignedDeals             Deal[]
+  assignedTasks             Task[]
+  reopenedDeals             Deal[]         @relation("DealReopenedBy")
+  salesRepQuotas            SalesRepQuota[]
+  auditLogs                 AuditLog[]
+  messages                  Message[]
+  channelMemberships        ChannelMember[]
+  refreshTokens             RefreshToken[]
+  reactions                 Reaction[]
+  readCursors               ReadCursor[]
+  notifications             Notification[]
+  presenceSessions          PresenceSession[]
+  meetings                  Meeting[]        @relation("MeetingStartedBy")
+  meetingParticipations     MeetingParticipant[]
+  conversations             ConversationParticipant[]
+  createdConversations      Conversation[]   @relation("CreatedConversations")
+  sharedNotes               SharedNote[]
+  notificationPreference    NotificationPreference?
+  dealStageHistory          DealStageHistory[]
+  crmActivities             CRMActivity[]    @relation("CRMActivityActor")
+  commissionRecords         CommissionRecord[]
+  approvedCommissions       CommissionRecord[] @relation("CommissionApprovedBy")
+  savedViews                SavedView[]
 
   @@index([organizationId])
   @@index([branchId])
@@ -611,8 +660,9 @@ model NotificationPreference {
 // ============================================================================
 
 model Customer {
-  id               String         @id @default(uuid())
+  id               String            @id @default(uuid())
   organizationId   String
+  branchId         String?
   customerCode     String
   name             String
   companyName      String?
@@ -620,20 +670,28 @@ model Customer {
   email            String?
   phone            String?
   billingAddress   String?
-  creditLimit      Decimal        @default(0.00) @db.Decimal(14, 2)
-  paymentTermsDays Int            @default(30)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  creditLimit      Decimal           @default(0.00) @db.Decimal(14, 2)
+  paymentTermsDays Int               @default(30)
+  lifecycle        CustomerLifecycle @default(LEAD)
+  type             CustomerType      @default(CORPORATE)
+  leadSource       String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch           Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   deals            Deal[]
   salesOrders      SalesOrder[]
   invoices         SalesInvoice[]
   contacts         CustomerContact[]
   tasks            Task[]
+  activities       CRMActivity[]
 
   @@index([kraPin])
   @@index([customerCode])
   @@index([organizationId])
+  @@index([branchId])
+  @@index([lifecycle])
   @@unique([organizationId, customerCode]) // audit fix SC-6: tenant-scoped
 }
 
@@ -645,50 +703,291 @@ model CustomerContact {
   email            String?
   phone            String?
   jobTitle         String?
-
-  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-}
-
-model Deal {
-  id               String         @id @default(uuid())
-  customerId       String
-  assignedToId     String
-  title            String
-  value            Decimal        @db.Decimal(14, 2)
-  currency         CurrencyCode   @default(KES)
-  stage            DealStage      @default(NEW_LEAD)
-  winProbability   Int            @default(20) // Percentage 0 - 100
-  expectedCloseDate DateTime?
-  lostReason       String?
+  isPrimary        Boolean        @default(false)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  assignedTo       User           @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
-  tasks            Task[]
-  quotations       Quotation[]
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  activities       CRMActivity[]
+
+  @@index([customerId])
+  @@index([customerId, isPrimary])
+}
+
+model Deal {
+  id                  String              @id @default(uuid())
+  organizationId      String              // Denormalized for tenant scoping
+  customerId          String
+  assignedToId        String
+  title               String
+  value               Decimal             @db.Decimal(14, 2)
+  currency            CurrencyCode        @default(KES)
+  stage               DealStage           @default(NEW_LEAD)
+  closeOutcome        DealCloseOutcome?   // Set when stage = CLOSED
+  winProbability      Int                 @default(20) // Percentage 0 - 100
+  expectedCloseDate   DateTime?
+  lostReason          String?
+  lostNotes           String?
+  source              String?
+  version             Int                 @default(1) // Optimistic locking
+  reopenedAt          DateTime?
+  reopenedById        String?
+  reopenReason        String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer            Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedTo          User                @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
+  reopenedBy          User?               @relation("DealReopenedBy", fields: [reopenedById], references: [id], onDelete: SetNull)
+  tasks               Task[]
+  quotations          Quotation[]
+  stageHistory        DealStageHistory[]
+  activities          CRMActivity[]
+  commissionRecords   CommissionRecord[]
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([assignedToId])
+  @@index([stage])
+  @@index([closeOutcome])
+  @@index([expectedCloseDate])
+  @@index([createdAt])
 }
 
 model Task {
   id               String         @id @default(uuid())
+  organizationId   String         // Denormalized for tenant scoping
   title            String
   description      String?
   priority         TaskPriority   @default(MEDIUM)
   status           TaskStatus     @default(PENDING)
   dueDate          DateTime?
+  completedAt      DateTime?
   assignedToId     String
   customerId       String?
   dealId           String?
+  projectId        String?
+  salesOrderId     String?
+  reminderAt       DateTime?
+  snoozedUntil     DateTime?
+  reminderSent     Boolean        @default(false)
   createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   assignedTo       User           @relation(fields: [assignedToId], references: [id], onDelete: Restrict)
   customer         Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
   deal             Deal?          @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  activities       CRMActivity[]
 
+  @@index([organizationId])
   @@index([assignedToId])
   @@index([customerId])
   @@index([dealId])
+  @@index([projectId])
+  @@index([salesOrderId])
   @@index([status])
+  @@index([dueDate])
+  @@index([reminderAt])
+}
+
+// ============================================================================
+// 5B. CRM EXTENSIONS (Phase 3)
+// ============================================================================
+
+model DealStageHistory {
+  id            String      @id @default(uuid())
+  organizationId String     // Denormalized for tenant scoping
+  dealId        String
+  fromStage     DealStage?
+  toStage       DealStage
+  closeOutcome  DealCloseOutcome?
+  winProbability Int        // Probability at time of transition
+  changedById   String
+  reason        String?     // Reason for stage change or close outcome
+  createdAt     DateTime    @default(now())
+
+  deal          Deal        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  changedBy     User        @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([dealId])
+  @@index([createdAt])
+}
+
+model CRMActivity {
+  id            String           @id @default(uuid())
+  organizationId String          // Denormalized for tenant scoping
+  customerId    String
+  dealId        String?
+  contactId     String?
+  taskId        String?
+  type          CRMActivityType
+  title         String
+  description   String?
+  metadataJson  String?         @db.Text // Flexible payload
+  actorId       String
+  occurredAt    DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  customer      Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deal          Deal?            @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  contact       CustomerContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  task          Task?            @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  actor         User             @relation("CRMActivityActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([dealId])
+  @@index([contactId])
+  @@index([taskId])
+  @@index([type])
+  @@index([occurredAt])
+  @@index([actorId])
+}
+
+model SalesRepQuota {
+  id              String      @id @default(uuid())
+  organizationId  String
+  userId          String
+  periodStart     DateTime
+  periodEnd       DateTime
+  periodType      String      // "MONTHLY" | "QUARTERLY" | "ANNUAL"
+  metric          String      // "REVENUE" | "DEALS_WON" | "WEIGHTED_PIPELINE"
+  targetValue     Decimal     @db.Decimal(14, 2)
+  currency        CurrencyCode @default(KES)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId, periodStart, periodEnd, metric]) // Prevent overlapping quotas
+  @@index([organizationId])
+  @@index([userId])
+  @@index([periodStart, periodEnd])
+}
+
+model CommissionRule {
+  id              String      @id @default(uuid())
+  organizationId  String
+  name            String
+  description     String?
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  isActive        Boolean     @default(true)
+  basis           String      // "DEAL_VALUE" | "COLLECTED_AMOUNT"
+  rateType        String      // "FLAT" | "TIERED"
+  rateValue       Decimal     @db.Decimal(5, 2) // Percentage or flat rate
+  tierJson        String?     @db.Text // For tiered: [{min, max, rate}, ...]
+  eligibleDealStages String[]  // Which stages qualify
+  excludedDealSources String[]  @default([]) // Sources to exclude
+  requiresApproval Boolean    @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  commissionRecords CommissionRecord[]
+
+  @@index([organizationId])
+  @@index([effectiveFrom, effectiveTo])
+  @@index([isActive])
+}
+
+model CommissionRecord {
+  id              String      @id @default(uuid())
+  organizationId  String
+  ruleId          String
+  dealId          String
+  userId          String      // Sales rep who earns commission
+  amount          Decimal     @db.Decimal(14, 2)
+  currency        CurrencyCode @default(KES)
+  basisAmount     Decimal     @db.Decimal(14, 2) // Deal value or collected amount used
+  rateApplied     Decimal     @db.Decimal(5, 2)
+  status          String      @default("PENDING") // "PENDING" | "APPROVED" | "PAID" | "CANCELLED"
+  approvedAt      DateTime?
+  approvedById    String?
+  paidAt          DateTime?
+  calculationKey  String      // Deterministic key to prevent recalculation duplicates
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  rule            CommissionRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  deal            Deal         @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  approvedBy      User?        @relation("CommissionApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([calculationKey]) // Prevent duplicate commission calculations
+  @@index([organizationId])
+  @@index([ruleId])
+  @@index([dealId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CustomFieldDefinition {
+  id              String      @id @default(uuid())
+  organizationId  String
+  entityType      String      // "CUSTOMER" | "CONTACT" | "DEAL"
+  fieldKey        String
+  label           String
+  fieldType       String      // "TEXT" | "NUMBER" | "DATE" | "BOOLEAN" | "SELECT" | "MULTI_SELECT"
+  optionsJson     String?     @db.Text // For SELECT/MULTI_SELECT: ["opt1", "opt2"]
+  isRequired      Boolean     @default(false)
+  isActive        Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  values          CustomFieldValue[]
+
+  @@unique([organizationId, entityType, fieldKey])
+  @@index([organizationId])
+  @@index([entityType])
+}
+
+model CustomFieldValue {
+  id                  String      @id @default(uuid())
+  organizationId      String
+  definitionId        String
+  entityId            String      // Customer/Contact/Deal ID
+  valueJson           String      @db.Text // Stores value as JSON
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  definition          CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, entityId])
+  @@index([organizationId])
+  @@index([entityId])
+}
+
+model SavedView {
+  id              String      @id @default(uuid())
+  organizationId  String
+  userId          String
+  entityType      String      // "CUSTOMER" | "DEAL" | "TASK"
+  name            String
+  filtersJson     String      @db.Text
+  sortJson        String      @db.Text
+  columnsJson     String?     @db.Text
+  isDefault       Boolean     @default(false)
+  isShared        Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([entityType])
 }
 
 // ============================================================================
