@@ -127,7 +127,7 @@ router.get('/performance', validateQuery(salesRepPerformanceQuerySchema), asyncH
     // Filter by expectedCloseDate for open deals, updatedAt for closed deals
     dealWhere.OR = [
       { stage: { not: 'CLOSED' }, expectedCloseDate: dateFilter },
-      { stage: 'CLOSED', updatedAt: dateFilter },
+      { stage: 'CLOSED', closedAt: dateFilter },
     ];
   }
 

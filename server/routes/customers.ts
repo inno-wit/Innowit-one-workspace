@@ -263,6 +263,7 @@ const createContactSchema = z.object({
   email: z.string().email().optional().or(z.literal('')),
   phone: z.string().optional(),
   jobTitle: z.string().optional(),
+  isPrimary: z.boolean().optional().default(false),
 });
 
 const updateContactSchema = createContactSchema.partial();

@@ -295,7 +295,7 @@ router.post('/:id/convert-to-order', authenticateToken, authorize('SUPER_ADMIN',
 
   const quotation = await prisma.quotation.findUnique({
     where: { id },
-    include: { deal: { include: { customer: true } }, items: { include: { product: true } } },
+    include: { deal: { include: { customer: true } }, items: { include: { product: true } }, salesOrder: true },
   });
 
   if (!quotation) {
@@ -311,8 +311,8 @@ router.post('/:id/convert-to-order', authenticateToken, authorize('SUPER_ADMIN',
   }
 
   // Check order number uniqueness
-  const existing = await prisma.salesOrder.findUnique({
-    where: { orderNumber },
+  const existing = await prisma.salesOrder.findFirst({
+    where: { organizationId: req.user!.organizationId, orderNumber },
   });
 
   if (existing) {
@@ -321,6 +321,7 @@ router.post('/:id/convert-to-order', authenticateToken, authorize('SUPER_ADMIN',
 
   const order = await prisma.salesOrder.create({
     data: {
+      organizationId: req.user!.organizationId,
       quotationId: id,
       customerId: quotation.deal.customerId,
       orderNumber,

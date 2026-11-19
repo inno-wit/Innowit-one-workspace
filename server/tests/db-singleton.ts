@@ -177,6 +177,27 @@ async function cleanGlobalTestData(prisma: PrismaClient) {
 
   const allTestUserIds = [...orgAUserIds, ...orgBUserIds];
 
+  // Clean Phase 3 CRM test data before deleting users/orgs
+  await prisma.automationExecutionLog.deleteMany({ where: { rule: { organizationId: { in: testOrgIds } } } });
+  await prisma.automationRule.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.cRMActivity.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.commissionRecord.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.commissionRule.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.salesRepQuota.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.savedView.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.customFieldValue.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.customFieldDefinition.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.dealStageHistory.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.salesOrderItem.deleteMany({ where: { salesOrder: { organizationId: { in: testOrgIds } } } });
+  await prisma.salesOrder.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.quotationItem.deleteMany({ where: { quotation: { organizationId: { in: testOrgIds } } } });
+  await prisma.quotation.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.task.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.deal.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.customerContact.deleteMany({ where: { customer: { organizationId: { in: testOrgIds } } } });
+  await prisma.customer.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+  await prisma.product.deleteMany({ where: { organizationId: { in: testOrgIds } } });
+
   await prisma.reaction.deleteMany({ where: { message: { channelId: { in: channelIds } } } });
   await prisma.readCursor.deleteMany({ where: { OR: [{ channelId: { in: channelIds } }, { recipientId: { in: allTestUserIds } }] } });
   await prisma.notification.deleteMany({ where: { userId: { in: orgAUserIds } } });

@@ -311,6 +311,7 @@ router.post('/:id/stage', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', '
 
     if (data.stage === 'CLOSED') {
       updatePayload.closeOutcome = data.closeOutcome;
+      updatePayload.closedAt = deal.closedAt || new Date();
       if (data.closeOutcome === 'LOST') {
         updatePayload.lostReason = data.lostReason;
         updatePayload.lostNotes = data.lostNotes || null;
@@ -323,13 +324,29 @@ router.post('/:id/stage', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', '
       }
     } else {
       updatePayload.closeOutcome = null;
+      updatePayload.closedAt = null;
       updatePayload.lostReason = null;
       updatePayload.lostNotes = null;
     }
 
-    const updated = await tx.deal.update({
+    // Atomic optimistic concurrency update
+    if (data.version !== undefined) {
+      const updateResult = await tx.deal.updateMany({
+        where: { id, version: data.version },
+        data: updatePayload,
+      });
+      if (updateResult.count === 0) {
+        throw new AppError(409, 'VERSION_CONFLICT', 'Deal was modified by another user. Please refresh and try again.');
+      }
+    } else {
+      await tx.deal.update({
+        where: { id },
+        data: updatePayload,
+      });
+    }
+
+    const updated = await tx.deal.findUniqueOrThrow({
       where: { id },
-      data: updatePayload,
       include: {
         customer: { select: { id: true, name: true, customerCode: true } },
         assignedTo: { select: { id: true, fullName: true, email: true } },
@@ -366,14 +383,15 @@ router.post('/:id/stage', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', '
         customerId: deal.customerId,
         dealId: deal.id,
         type: actType,
-        summary,
-        metadata: {
+        title: actType === 'DEAL_WON' ? 'Deal Won' : (actType === 'DEAL_LOST' ? 'Deal Lost' : 'Deal Stage Change'),
+        description: summary,
+        metadataJson: JSON.stringify({
           fromStage: deal.stage,
           toStage: data.stage,
           closeOutcome: data.closeOutcome,
-          reason: data.reason,
-        },
-        performedById: req.user!.userId,
+          reason: data.reason || data.lostReason,
+        }),
+        actorId: req.user!.userId,
       },
     });
 
@@ -411,6 +429,7 @@ router.post('/:id/reopen', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 
       data: {
         stage: 'NEGOTIATION',
         closeOutcome: null,
+        closedAt: null,
         winProbability: 50,
         reopenedAt: new Date(),
         reopenedById: req.user!.userId,
@@ -442,9 +461,10 @@ router.post('/:id/reopen', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 
         customerId: deal.customerId,
         dealId: deal.id,
         type: 'DEAL_REOPENED',
-        summary: `Deal reopened to NEGOTIATION. Reason: ${reason}`,
-        metadata: { reason },
-        performedById: req.user!.userId,
+        title: 'Deal Reopened',
+        description: `Deal reopened to NEGOTIATION. Reason: ${reason}`,
+        metadataJson: JSON.stringify({ reason }),
+        actorId: req.user!.userId,
       },
     });
 
