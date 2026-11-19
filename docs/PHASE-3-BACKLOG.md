@@ -1,8 +1,9 @@
 # PHASE 3 BACKLOG: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.0.0  
+**Document Version:** 1.1.0  
 **Date:** 2026-11-19  
 **Status:** As-Built / Post-Release  
+**Final Commit:** `673ebaf178ed80f9af406f019cdcd847f809a8a5`  
 
 ---
 
@@ -42,6 +43,10 @@
 | CRM-032 | Integration & regression testing | 3.8 | ✅ Done |
 | CRM-033 | Documentation complete | 3.8 | ✅ Done |
 | CRM-034 | Deal stage transitions (`/stage`, `/reopen`, `/stage-history`) | 3.3 | ✅ Done (Remediated) |
+| CRM-035 | Additive migration: AutomationRule & AutomationExecutionLog | R3 | ✅ Done |
+| CRM-036 | Additive migration: Deal.closedAt & Deal.wonQuotationNumber | R3 | ✅ Done |
+| CRM-037 | Additive migration: QuotationItem model | R3 | ✅ Done |
+| CRM-038 | 8 dedicated CRM integration test files (137 tests) | R3 | ✅ Done |
 | FE-001 | Wire Customer Directory to `/api/customers` | R3 | ✅ Done (Remediated) |
 | FE-002 | Wire Customer Detail Drawer to server | R3 | ✅ Done (Remediated) |
 | FE-003 | Wire Deals Kanban to `/api/deals` | R3 | ✅ Done (Remediated) |
