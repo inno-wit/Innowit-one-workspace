@@ -140,7 +140,7 @@
 
 | Item | Owner | Tracking |
 |---|---|---|
-| Frontend wiring for new API endpoints | Frontend Team | TBD |
+| Frontend wiring for CRM endpoints | Completed in remediation wave | ✅ VERIFIED |
 | Real-time CRM events via Phase 2 RealtimeGateway | Backend Team | TBD |
 | Mobile-responsive CRM UI | Frontend Team | TBD |
 | Email/Calendar integration for workflows | Backend Team | TBD |

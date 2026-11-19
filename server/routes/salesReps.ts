@@ -124,10 +124,10 @@ router.get('/performance', validateQuery(salesRepPerformanceQuerySchema), asyncH
     if (periodStart) dateFilter.gte = new Date(periodStart);
     if (periodEnd) dateFilter.lte = new Date(periodEnd);
     
-    // Filter by expectedCloseDate for open deals, closedAt for closed deals
+    // Filter by expectedCloseDate for open deals, updatedAt for closed deals
     dealWhere.OR = [
       { stage: { not: 'CLOSED' }, expectedCloseDate: dateFilter },
-      { stage: 'CLOSED', closedAt: dateFilter },
+      { stage: 'CLOSED', updatedAt: dateFilter },
     ];
   }
 
@@ -299,7 +299,7 @@ router.get('/quotas', validateQuery(quotaListQuerySchema), asyncHandler(async (r
           assignedToId: quota.userId,
           stage: 'CLOSED',
           closeOutcome: 'WON',
-          closedAt: { gte: quota.periodStart, lte: quota.periodEnd },
+          updatedAt: { gte: quota.periodStart, lte: quota.periodEnd },
         },
       });
       attained = deals.reduce((sum, d) => sum + Number(d.value), 0);
@@ -309,7 +309,7 @@ router.get('/quotas', validateQuery(quotaListQuerySchema), asyncHandler(async (r
           assignedToId: quota.userId,
           stage: 'CLOSED',
           closeOutcome: 'WON',
-          closedAt: { gte: quota.periodStart, lte: quota.periodEnd },
+          updatedAt: { gte: quota.periodStart, lte: quota.periodEnd },
         },
       });
     } else if (quota.metric === 'WEIGHTED_PIPELINE') {
@@ -706,10 +706,10 @@ router.post('/commission-records/calculate', authorize('SUPER_ADMIN', 'ADMIN', '
       where: {
         organizationId: req.user!.organizationId,
         isActive: true,
-        effectiveFrom: { lte: deal.closedAt || new Date() },
+        effectiveFrom: { lte: deal.updatedAt || new Date() },
         OR: [
           { effectiveTo: null },
-          { effectiveTo: { gte: deal.closedAt || new Date() } },
+          { effectiveTo: { gte: deal.updatedAt || new Date() } },
         ],
         eligibleDealStages: { has: deal.stage },
       },

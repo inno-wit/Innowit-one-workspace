@@ -6,6 +6,7 @@ import {
   CheckSquare,
   Building2,
   TrendingUp,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import {
@@ -18,7 +19,17 @@ import {
   ActivityLogRecord,
   DealStage,
 } from '@/types';
-import { loadCrmState, saveCrmState, CrmState } from '@/modules/crm/store';
+import {
+  loadCrmState,
+  saveCrmState,
+  CrmState,
+  fetchCrmStateFromServer,
+  createCustomerOnServer,
+  createDealOnServer,
+  updateDealStageOnServer,
+  createTaskOnServer,
+  toggleTaskOnServer,
+} from '@/modules/crm/store';
 
 import { CrmDashboardView } from '@/components/crm/CrmDashboardView';
 import { CustomersDirectoryView } from '@/components/crm/CustomersDirectoryView';
@@ -43,8 +54,50 @@ export function CrmView({
   onNavigate,
   onSyncCustomers,
 }: CrmViewProps) {
-  // Load persisted state
+  // Load initial persisted/seed state
   const [crmState, setCrmState] = useState<CrmState>(() => loadCrmState());
+  const [isLoadingServer, setIsLoadingServer] = useState<boolean>(true);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  // Sync with real server API on mount
+  useEffect(() => {
+    let mounted = true;
+    async function syncWithServer() {
+      setIsLoadingServer(true);
+      try {
+        const serverData = await fetchCrmStateFromServer();
+        if (mounted) {
+          setCrmState((prev) => {
+            const next: CrmState = {
+              ...prev,
+              customers: serverData.customers?.length ? serverData.customers : prev.customers,
+              deals: serverData.deals?.length ? serverData.deals : prev.deals,
+              tasks: serverData.tasks?.length ? serverData.tasks : prev.tasks,
+              isServerSynced: true,
+            };
+            saveCrmState(next);
+            if (onSyncCustomers) onSyncCustomers(next.customers);
+            return next;
+          });
+          setServerError(null);
+        }
+      } catch (err: any) {
+        console.error('CRM Server sync error:', err);
+        if (mounted) {
+          setServerError('Offline or fallback mode active');
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingServer(false);
+        }
+      }
+    }
+
+    syncWithServer();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Determine active tab from URL path
   const getTabFromPath = (path: string): CrmSubTab => {
@@ -82,16 +135,24 @@ export function CrmView({
     });
   };
 
-  // 1. Add Customer
-  const handleCreateCustomer = (newCust: CustomerRecord) => {
+  // 1. Add Customer (with server persistence)
+  const handleCreateCustomer = async (newCust: CustomerRecord) => {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    let createdCust = newCust;
+
+    try {
+      createdCust = await createCustomerOnServer(newCust);
+    } catch (err) {
+      console.warn('Could not persist customer to server, keeping optimistic local:', err);
+    }
+
     const newActivity: ActivityLogRecord = {
       id: `act_${Date.now()}`,
       entityType: 'CUSTOMER',
-      entityId: newCust.id,
-      entityName: newCust.name,
+      entityId: createdCust.id,
+      entityName: createdCust.name,
       title: 'Customer Account Created',
-      description: `Registered ${newCust.name} (PIN: ${newCust.kraPin}) with credit limit of KES ${(newCust.creditLimitKes || 0).toLocaleString()}.`,
+      description: `Registered ${createdCust.name} (PIN: ${createdCust.kraPin}) with credit limit of KES ${(createdCust.creditLimitKes || 0).toLocaleString()}.`,
       user: userFullName,
       timestamp,
       type: 'STAGE_CHANGE',
@@ -99,7 +160,7 @@ export function CrmView({
 
     updateStateAndPersist((prev) => ({
       ...prev,
-      customers: [newCust, ...prev.customers],
+      customers: [createdCust, ...prev.customers.filter(c => c.id !== createdCust.id)],
       activityLogs: [newActivity, ...prev.activityLogs],
     }));
   };
@@ -112,16 +173,24 @@ export function CrmView({
     }));
   };
 
-  // 3. Create Deal
-  const handleCreateDeal = (newDeal: DealRecord) => {
+  // 3. Create Deal (with server persistence)
+  const handleCreateDeal = async (newDeal: DealRecord) => {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    let createdDeal = newDeal;
+
+    try {
+      createdDeal = await createDealOnServer(newDeal);
+    } catch (err) {
+      console.warn('Could not persist deal to server, keeping optimistic local:', err);
+    }
+
     const newActivity: ActivityLogRecord = {
       id: `act_${Date.now()}`,
       entityType: 'DEAL',
-      entityId: newDeal.id,
-      entityName: newDeal.title,
+      entityId: createdDeal.id,
+      entityName: createdDeal.title,
       title: 'New Deal Added to Pipeline',
-      description: `Created opportunity "${newDeal.title}" for ${newDeal.customerName} valued at KES ${newDeal.value.toLocaleString()}.`,
+      description: `Created opportunity "${createdDeal.title}" for ${createdDeal.customerName} valued at KES ${createdDeal.value.toLocaleString()}.`,
       user: userFullName,
       timestamp,
       type: 'STAGE_CHANGE',
@@ -129,13 +198,13 @@ export function CrmView({
 
     updateStateAndPersist((prev) => ({
       ...prev,
-      deals: [newDeal, ...prev.deals],
+      deals: [createdDeal, ...prev.deals.filter(d => d.id !== createdDeal.id)],
       activityLogs: [newActivity, ...prev.activityLogs],
     }));
   };
 
-  // 4. Update Deal Stage (including Won / Lost outcomes)
-  const handleUpdateDealStage = (
+  // 4. Update Deal Stage (including Won / Lost outcomes with server persistence)
+  const handleUpdateDealStage = async (
     dealId: string,
     newStage: DealStage,
     lostReason?: string,
@@ -143,91 +212,107 @@ export function CrmView({
     generateQuotation?: boolean
   ) => {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const targetDeal = crmState.deals.find((d) => d.id === dealId);
 
-    updateStateAndPersist((prev) => {
-      let movedDealTitle = '';
-      let movedCustomerName = '';
-      let dealVal = 0;
+    // Optimistic local update
+    let movedDealTitle = targetDeal?.title || '';
+    let movedCustomerName = targetDeal?.customerName || '';
+    let dealVal = targetDeal?.value || 0;
 
-      const updatedDeals = prev.deals.map((d) => {
-        if (d.id !== dealId) return d;
-        movedDealTitle = d.title;
-        movedCustomerName = d.customerName;
-        dealVal = d.value;
-
-        let prob = d.winProbability;
-        if (newStage === 'NEW_LEAD') prob = 20;
-        if (newStage === 'CONTACTED') prob = 40;
-        if (newStage === 'QUALIFIED') prob = 60;
-        if (newStage === 'PROPOSAL') prob = 75;
-        if (newStage === 'NEGOTIATION') prob = 90;
-        if (newStage === 'CLOSED_WON') prob = 100;
-        if (newStage === 'CLOSED_LOST') prob = 0;
-
-        return {
-          ...d,
-          stage: newStage,
-          winProbability: prob,
-          lostReason: newStage === 'CLOSED_LOST' ? lostReason : undefined,
-          lostNotes: newStage === 'CLOSED_LOST' ? lostNotes : undefined,
-          wonQuotationNumber:
-            newStage === 'CLOSED_WON' && generateQuotation
-              ? `QUO-${new Date().getFullYear()}-${String(Math.floor(100 + Math.random() * 900))}`
-              : d.wonQuotationNumber,
-          updatedAt: timestamp.slice(0, 10),
-        };
-      });
-
-      // Update Sales Rep stats if closed won
-      let updatedReps = [...prev.salesReps];
-      if (newStage === 'CLOSED_WON') {
-        const targetDeal = prev.deals.find((d) => d.id === dealId);
-        if (targetDeal) {
-          updatedReps = updatedReps.map((r) =>
-            r.id === targetDeal.assignedToId
-              ? { ...r, achievedRevenueKes: r.achievedRevenueKes + targetDeal.value }
-              : r
-          );
-        }
-      }
-
-      // Add to Activity Log
-      const activity: ActivityLogRecord = {
-        id: `act_${Date.now()}`,
-        entityType: 'DEAL',
-        entityId: dealId,
-        entityName: movedDealTitle,
-        title: `Deal Stage Updated to ${newStage.replace('_', ' ')}`,
-        description:
-          newStage === 'CLOSED_LOST'
-            ? `Deal closed lost for ${movedCustomerName}. Reason: ${lostReason}.`
-            : newStage === 'CLOSED_WON'
-            ? `Deal WON! KES ${dealVal.toLocaleString()} added to realized sales revenue.`
-            : `Opportunity advanced to ${newStage.replace('_', ' ')}.`,
-        user: userFullName,
-        timestamp,
-        type: 'STAGE_CHANGE',
-      };
+    const optimisticDeals = crmState.deals.map((d) => {
+      if (d.id !== dealId) return d;
+      let prob = d.winProbability;
+      if (newStage === 'NEW_LEAD') prob = 20;
+      if (newStage === 'CONTACTED') prob = 40;
+      if (newStage === 'QUALIFIED') prob = 60;
+      if (newStage === 'PROPOSAL') prob = 75;
+      if (newStage === 'NEGOTIATION') prob = 90;
+      if (newStage === 'CLOSED_WON') prob = 100;
+      if (newStage === 'CLOSED_LOST') prob = 0;
 
       return {
-        ...prev,
-        deals: updatedDeals,
-        salesReps: updatedReps,
-        activityLogs: [activity, ...prev.activityLogs],
+        ...d,
+        stage: newStage,
+        winProbability: prob,
+        lostReason: newStage === 'CLOSED_LOST' ? lostReason : undefined,
+        lostNotes: newStage === 'CLOSED_LOST' ? lostNotes : undefined,
+        wonQuotationNumber:
+          newStage === 'CLOSED_WON' && generateQuotation
+            ? `QUO-${new Date().getFullYear()}-${String(Math.floor(100 + Math.random() * 900))}`
+            : d.wonQuotationNumber,
+        updatedAt: timestamp.slice(0, 10),
       };
     });
+
+    let updatedReps = [...crmState.salesReps];
+    if (newStage === 'CLOSED_WON' && targetDeal) {
+      updatedReps = updatedReps.map((r) =>
+        r.id === targetDeal.assignedToId
+          ? { ...r, achievedRevenueKes: r.achievedRevenueKes + targetDeal.value }
+          : r
+      );
+    }
+
+    const activity: ActivityLogRecord = {
+      id: `act_${Date.now()}`,
+      entityType: 'DEAL',
+      entityId: dealId,
+      entityName: movedDealTitle,
+      title: `Deal Stage Updated to ${newStage.replace('_', ' ')}`,
+      description:
+        newStage === 'CLOSED_LOST'
+          ? `Deal closed lost for ${movedCustomerName}. Reason: ${lostReason}.`
+          : newStage === 'CLOSED_WON'
+          ? `Deal WON! KES ${dealVal.toLocaleString()} added to realized sales revenue.`
+          : `Opportunity advanced to ${newStage.replace('_', ' ')}.`,
+      user: userFullName,
+      timestamp,
+      type: 'STAGE_CHANGE',
+    };
+
+    updateStateAndPersist((prev) => ({
+      ...prev,
+      deals: optimisticDeals,
+      salesReps: updatedReps,
+      activityLogs: [activity, ...prev.activityLogs],
+    }));
+
+    // Server persistence
+    try {
+      const serverUpdated = await updateDealStageOnServer(
+        dealId,
+        newStage,
+        lostReason,
+        lostNotes,
+        targetDeal?.version
+      );
+      updateStateAndPersist((prev) => ({
+        ...prev,
+        deals: prev.deals.map((d) => (d.id === dealId ? { ...d, ...serverUpdated } : d)),
+      }));
+    } catch (err: any) {
+      console.error('Failed to persist stage update to server:', err);
+    }
   };
 
-  // 5. Create Task
-  const handleCreateTask = (newTask: TaskRecord) => {
+  // 5. Create Task (with server persistence)
+  const handleCreateTask = async (newTask: TaskRecord) => {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    let createdTask = newTask;
+
+    try {
+      createdTask = await createTaskOnServer(newTask);
+    } catch (err) {
+      console.warn('Could not persist task to server, keeping optimistic local:', err);
+    }
+
     const activity: ActivityLogRecord = {
       id: `act_${Date.now()}`,
       entityType: 'TASK',
-      entityId: newTask.id,
-      entityName: newTask.title,
+      entityId: createdTask.id,
+      entityName: createdTask.title,
       title: 'Action Task Scheduled',
-      description: `Task "${newTask.title}" assigned to ${newTask.assignedToName} (Due: ${newTask.dueDate}).`,
+      description: `Task "${createdTask.title}" assigned to ${createdTask.assignedToName} (Due: ${createdTask.dueDate}).`,
       user: userFullName,
       timestamp,
       type: 'NOTE',
@@ -235,28 +320,36 @@ export function CrmView({
 
     updateStateAndPersist((prev) => ({
       ...prev,
-      tasks: [newTask, ...prev.tasks],
+      tasks: [createdTask, ...prev.tasks.filter(t => t.id !== createdTask.id)],
       activityLogs: [activity, ...prev.activityLogs],
     }));
   };
 
-  // 6. Toggle Task Status
-  const handleToggleTaskStatus = (taskId: string) => {
+  // 6. Toggle Task Status (with server persistence)
+  const handleToggleTaskStatus = async (taskId: string) => {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+    const targetTask = crmState.tasks.find((t) => t.id === taskId);
+    const nextStatus = targetTask?.status === 'COMPLETED' ? 'PENDING' : 'COMPLETED';
 
     updateStateAndPersist((prev) => {
       const updatedTasks = prev.tasks.map((t) => {
         if (t.id !== taskId) return t;
-        const nextStatus = t.status === 'COMPLETED' ? 'PENDING' : 'COMPLETED';
         return {
           ...t,
           status: nextStatus as TaskRecord['status'],
           completedAt: nextStatus === 'COMPLETED' ? timestamp : undefined,
         };
       });
-
       return { ...prev, tasks: updatedTasks };
     });
+
+    try {
+      if (targetTask) {
+        await toggleTaskOnServer(taskId, targetTask.status);
+      }
+    } catch (err) {
+      console.warn('Could not toggle task status on server:', err);
+    }
   };
 
   return (
@@ -269,17 +362,31 @@ export function CrmView({
               <Users className="text-[#E03616]" size={22} />
               CRM & Sales Pipeline Management
             </h1>
-            <Badge variant="slateBlue">Phase 3 Complete</Badge>
+            <Badge variant="slateBlue">Phase 3 Integrated</Badge>
           </div>
           <p className="mt-0.5 text-xs text-[#54657E]">
             Customer directory with KRA compliance, 6-stage Kanban deals pipeline, cross-entity tasks, and executive performance metrics.
           </p>
         </div>
 
-        {/* Quick Nav Status */}
+        {/* Quick Nav Status — Live Database Synced */}
         <div className="flex items-center gap-2 font-mono text-xs text-[#54657E]">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          <span>Local Storage V3: Synchronized</span>
+          {isLoadingServer ? (
+            <>
+              <RefreshCw className="h-3 w-3 animate-spin text-amber-500" />
+              <span>Connecting to PostgreSQL...</span>
+            </>
+          ) : serverError ? (
+            <>
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              <span>Local Cache Active</span>
+            </>
+          ) : (
+            <>
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span>PostgreSQL Core: Connected</span>
+            </>
+          )}
         </div>
       </div>
 

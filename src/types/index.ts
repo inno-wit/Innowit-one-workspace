@@ -296,6 +296,7 @@ export interface CustomerRecord {
   totalRevenueKes: number;
   outstandingBalanceKes: number;
   status: 'ACTIVE' | 'INACTIVE';
+  lifecycle?: 'LEAD' | 'ACTIVE' | 'INACTIVE';
   businessType?: 'CORPORATE' | 'INDIVIDUAL';
   leadSource?: string;
   createdAt?: string;
@@ -446,11 +447,13 @@ export interface DealRecord {
   value: number; // in KES
   currency: 'KES' | 'USD';
   stage: DealStage;
+  closeOutcome?: 'WON' | 'LOST';
   winProbability: number; // 0 - 100
   expectedCloseDate: string; // YYYY-MM-DD
   lostReason?: string;
   lostNotes?: string;
   wonQuotationNumber?: string;
+  version?: number;
   createdAt: string;
   updatedAt: string;
   notes?: string;

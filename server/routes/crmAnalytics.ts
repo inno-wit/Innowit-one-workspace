@@ -122,7 +122,7 @@ router.get('/dashboard', validateQuery(analyticsQuerySchema), asyncHandler(async
       ...where,
       OR: [
         { stage: { not: 'CLOSED' }, expectedCloseDate: { gte: start, lte: end } },
-        { stage: 'CLOSED', closedAt: { gte: start, lte: end } },
+        { stage: 'CLOSED', updatedAt: { gte: start, lte: end } },
       ],
     },
     include: {
@@ -165,7 +165,7 @@ router.get('/dashboard', validateQuery(analyticsQuerySchema), asyncHandler(async
   if (wonDeals.length > 0) {
     const totalDays = wonDeals.reduce((sum, d) => {
       const created = new Date(d.createdAt).getTime();
-      const closed = d.closedAt ? new Date(d.closedAt).getTime() : new Date(d.updatedAt).getTime();
+      const closed = new Date(d.updatedAt).getTime();
       return sum + (closed - created) / (1000 * 60 * 60 * 24);
     }, 0);
     avgSalesCycleDays = Math.round(totalDays / wonDeals.length);
@@ -409,7 +409,7 @@ router.get('/rep-performance', validateQuery(repPerformanceQuerySchema), asyncHa
           ...(periodStart && { gte: new Date(periodStart) }),
           ...(periodEnd && { lte: new Date(periodEnd) }),
         }},
-        { stage: 'CLOSED', closedAt: { 
+        { stage: 'CLOSED', updatedAt: { 
           ...(periodStart && { gte: new Date(periodStart) }),
           ...(periodEnd && { lte: new Date(periodEnd) }),
         }},
@@ -462,7 +462,7 @@ router.get('/rep-performance', validateQuery(repPerformanceQuerySchema), asyncHa
     if (wonDeals.length > 0) {
       const totalDays = wonDeals.reduce((sum, d) => {
         const created = new Date(d.createdAt).getTime();
-        const closed = d.closedAt ? new Date(d.closedAt).getTime() : new Date(d.updatedAt).getTime();
+        const closed = new Date(d.updatedAt).getTime();
         return sum + (closed - created) / (1000 * 60 * 60 * 24);
       }, 0);
       avgSalesCycle = Math.round(totalDays / wonDeals.length);
@@ -526,7 +526,7 @@ router.get('/customers', validateQuery(analyticsQuerySchema), asyncHandler(async
         where: {
           OR: [
             { stage: { not: 'CLOSED' }, expectedCloseDate: { gte: start, lte: end } },
-            { stage: 'CLOSED', closedAt: { gte: start, lte: end } },
+            { stage: 'CLOSED', updatedAt: { gte: start, lte: end } },
           ],
         },
         include: { assignedTo: { select: { id: true, fullName: true } } },

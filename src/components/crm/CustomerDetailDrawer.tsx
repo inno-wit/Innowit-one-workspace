@@ -28,6 +28,7 @@ import {
   ActivityLogRecord,
 } from '@/types';
 import { formatKES } from '@/lib/utils';
+import { apiClient } from '@/services/api/apiClient';
 
 interface CustomerDetailDrawerProps {
   customer: CustomerRecord | null;
@@ -77,20 +78,47 @@ export function CustomerDetailDrawer({
 
   const totalDealsPipelineKes = customerDeals.reduce((sum, d) => sum + d.value, 0);
 
-  const handleSaveContact = (e: React.FormEvent) => {
+  const handleSaveContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cFirstName.trim() || !cLastName.trim()) return;
 
-    const newContact: CustomerContact = {
-      id: `cont_${Date.now()}`,
-      customerId: customer.id,
+    const payload = {
       firstName: cFirstName.trim(),
       lastName: cLastName.trim(),
       email: cEmail.trim() || customer.email,
       phone: cPhone.trim() || customer.phone,
-      jobTitle: cJobTitle.trim() || 'Commercial Contact',
+      title: cJobTitle.trim() || 'Commercial Contact',
       isPrimary: customerContacts.length === 0,
     };
+
+    let newContact: CustomerContact = {
+      id: `cont_${Date.now()}`,
+      customerId: customer.id,
+      firstName: payload.firstName,
+      lastName: payload.lastName,
+      email: payload.email,
+      phone: payload.phone,
+      jobTitle: payload.title,
+      isPrimary: payload.isPrimary,
+    };
+
+    try {
+      const res = await apiClient.createContact(customer.id, payload);
+      if (res?.data) {
+        newContact = {
+          id: res.data.id,
+          customerId: customer.id,
+          firstName: res.data.firstName,
+          lastName: res.data.lastName,
+          email: res.data.email,
+          phone: res.data.phone,
+          jobTitle: res.data.title || res.data.jobTitle || payload.title,
+          isPrimary: res.data.isPrimary,
+        };
+      }
+    } catch (err) {
+      console.warn('Could not persist contact to server, using local ID:', err);
+    }
 
     onAddContact(newContact);
     setShowAddContact(false);

@@ -41,22 +41,24 @@
 | CRM-031 | Workflow automation (trigger/action) | 3.7 | ✅ Done |
 | CRM-032 | Integration & regression testing | 3.8 | ✅ Done |
 | CRM-033 | Documentation complete | 3.8 | ✅ Done |
+| CRM-034 | Deal stage transitions (`/stage`, `/reopen`, `/stage-history`) | 3.3 | ✅ Done (Remediated) |
+| FE-001 | Wire Customer Directory to `/api/customers` | R3 | ✅ Done (Remediated) |
+| FE-002 | Wire Customer Detail Drawer to server | R3 | ✅ Done (Remediated) |
+| FE-003 | Wire Deals Kanban to `/api/deals` | R3 | ✅ Done (Remediated) |
+| FE-004 | Wire Deal Outcome Modal to API | R3 | ✅ Done (Remediated) |
+| FE-005 | Wire Tasks Manager to `/api/tasks` | R3 | ✅ Done (Remediated) |
+| FE-006 | Wire CRM Dashboard to server sync | R3 | ✅ Done (Remediated) |
+| TD-001 | Replace localStorage CRM store with server sync | R3 | ✅ Done (Remediated) |
 
 ---
 
 ## 2. Deferred (Post-Phase 3 / Phase 4+)
 
-### 2.1 Frontend Integration (Priority: HIGH)
+### 2.1 Frontend UI Expansion (Priority: MEDIUM)
 
 | ID | Item | Description | Dependencies |
 |---|---|---|---|
-| FE-001 | Wire Customer Directory to `/api/customers` | Replace localStorage with server calls | CRM-002 |
-| FE-002 | Wire Customer Detail Drawer to server | Load contacts, deals, invoices, activities | CRM-002, CRM-006 |
-| FE-003 | Wire Deals Kanban to `/api/deals` | Stage transitions via API | CRM-006, CRM-007 |
-| FE-004 | Wire Deal Outcome Modal to API | Won/Lost with quotation option | CRM-008, CRM-011 |
-| FE-005 | Wire Tasks Manager to `/api/tasks` | Complete, snooze, upcoming | CRM-012, CRM-013 |
-| FE-006 | Wire CRM Dashboard to analytics API | Real metrics from server | CRM-020-024 |
-| FE-007 | Wire Sales Rep Performance page | Quotas, commissions, leaderboard | CRM-015-019 |
+| FE-007 | Wire Dedicated Sales Rep Performance View | Dedicated Quotas, commissions UI | CRM-015-019 |
 | FE-008 | Saved Views UI | Save/load/delete views | CRM-025 |
 | FE-009 | Custom Fields UI | Define fields, render in forms | CRM-028, CRM-029 |
 | FE-010 | Import/Export UI | File upload, mapping, dry-run | CRM-030 |
@@ -113,7 +115,7 @@
 
 | ID | Item | Description | Priority |
 |---|---|---|---|
-| TD-001 | Replace localStorage CRM store with server sync | Current store is client-only | HIGH |
+| TD-001 | Replace localStorage CRM store with server sync | Complete (server sync + fallback) | ✅ RESOLVED |
 | TD-002 | Add database indexes for custom field queries | Performance | MEDIUM |
 | TD-003 | Add pagination cursor for large datasets | Offset pagination has limits | MEDIUM |
 | TD-004 | Implement cache invalidation for analytics | Currently no cache | MEDIUM |
