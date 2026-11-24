@@ -1,8 +1,27 @@
 # PHASE 3 DOMAIN MODEL: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.0.0  
-**Date:** 2026-11-19  
-**Status:** As-Built  
+**Document Version:** 1.1.0
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23
+**Status:** As-Built / Reconciled
+
+> **Reconciliation notice (2026-11-23).** Two defects were corrected here. (1) §2.15 documented an `ImportJob` model that **does not exist** in `prisma/schema.prisma` or in any migration. (2) The document did not state the verified model count: Phase 3 takes the schema from **46 models / 22 enums** at baseline `b87ac48` to **57 models / 26 enums** at HEAD `7c35b39`, a net addition of **11 models and 4 enums**, counted once. Corrections marked **[CORRECTED]**. Canonical record: `docs/PHASE-3-RELEASE-RECONCILIATION.md` §5.
+
+---
+
+## 0. Verified schema counts
+
+| Metric | Baseline `b87ac48` | HEAD `7c35b39` | Added by Phase 3 |
+|---|---:|---:|---:|
+| Models | 46 | 57 | **11** |
+| Enums | 22 | 26 | **4** |
+
+The 11 added models, each counted exactly once:
+
+`DealStageHistory`, `CRMActivity`, `SalesRepQuota`, `CommissionRule`, `CommissionRecord`, `CustomFieldDefinition`, `CustomFieldValue`, `SavedView`, `AutomationRule`, `AutomationExecutionLog`, `QuotationItem`
+
+The 4 added enums: `DealCloseOutcome`, `CustomerLifecycle`, `CustomerType`, `CRMActivityType`. `DealStage` was **extended** with a `CLOSED` value rather than created.
+
+**[CORRECTED]** The original Phase 3 exit audit claimed "13 new models" and listed `ImportJob` among them. Actual is 11. The earlier "13 + 3 from additive migrations" figure double-counted `AutomationRule`, `AutomationExecutionLog` and `QuotationItem`, which are already inside the 11.
 
 ---
 
@@ -556,7 +575,10 @@ model AutomationExecutionLog {
 }
 ```
 
-### 2.15 ImportJob
+### 2.15 ImportJob — **[CORRECTED: MODEL DOES NOT EXIST]**
+
+> **Correction (2026-11-23).** The `model ImportJob` block below was never added to `prisma/schema.prisma` and appears in no migration. It is retained as a **proposed design**, not an as-built model. Import/Export is implemented in `server/routes/crmPremium.ts` without a persisted job table: jobs are processed in-request and nothing is written to an `ImportJob` table. Any document that counted `ImportJob` among the delivered Phase 3 models was wrong.
+
 ```typescript
 model ImportJob {
   id                  String      @id @default(uuid())
@@ -599,8 +621,8 @@ model ImportJob {
 | CustomFieldDefinition | `organizationId` | `(organizationId, entityType, fieldKey)` |
 | CustomFieldValue | `organizationId` | `(definitionId, entityId)` |
 | SavedView | `organizationId` | — |
-| AutomationRule | `organizationId` | — |
-| ImportJob | `organizationId` | `idempotencyKey` |
+| AutomationRule | `organizationId` | - |
+| ImportJob | **does not exist** **[CORRECTED]** | Model absent from `schema.prisma` and all migrations |
 
 ---
 

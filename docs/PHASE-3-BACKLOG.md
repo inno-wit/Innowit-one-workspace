@@ -1,9 +1,15 @@
 # PHASE 3 BACKLOG: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.1.0  
-**Date:** 2026-11-19  
-**Status:** As-Built / Post-Release  
-**Final Commit:** `dee3e3c0dc57bd4951cd38e9cd07298fb1b99274`  
+**Document Version:** 1.2.0  
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23  
+**Status:** As-Built / Post-Release / Reconciled  
+**Final Commit:** `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f` **[CORRECTED — was `dee3e3c`]**
+
+> **Reconciliation notice (2026-11-23).** Three status defects were corrected here: TD-001 was marked RESOLVED while §6 simultaneously said the frontend was "localStorage only"; CRM-038 claimed 137 new tests when there are 46; and the state vocabulary was inconsistent. Corrections are marked **[CORRECTED]**. Canonical record: `docs/PHASE-3-RELEASE-RECONCILIATION.md`.
+
+## 0. State vocabulary
+
+Every item below uses exactly one of: `DONE`, `PARTIAL`, `DEFERRED`, `BLOCKED`, `NOT_STARTED`. Each carries an owner (or `UNASSIGNED`) and, for non-DONE items, an acceptance criterion.
 
 ---
 
@@ -46,7 +52,7 @@
 | CRM-035 | Additive migration: AutomationRule & AutomationExecutionLog | R3 | ✅ Done |
 | CRM-036 | Additive migration: Deal.closedAt & Deal.wonQuotationNumber | R3 | ✅ Done |
 | CRM-037 | Additive migration: QuotationItem model | R3 | ✅ Done |
-| CRM-038 | 8 dedicated CRM integration test files (137 tests) | R3 | ✅ Done |
+| CRM-038 | 8 dedicated CRM integration test files (**46 tests**) **[CORRECTED — was 137]** | R3 | ✅ DONE |
 | FE-001 | Wire Customer Directory to `/api/customers` | R3 | ✅ Done (Remediated) |
 | FE-002 | Wire Customer Detail Drawer to server | R3 | ✅ Done (Remediated) |
 | FE-003 | Wire Deals Kanban to `/api/deals` | R3 | ✅ Done (Remediated) |
@@ -120,13 +126,13 @@
 
 | ID | Item | Description | Priority |
 |---|---|---|---|
-| TD-001 | Replace localStorage CRM store with server sync | Complete (server sync + fallback) | ✅ RESOLVED |
+| TD-001 | Replace localStorage CRM store with server sync | **PARTIAL — server is authoritative on read; localStorage still persists full CRM records under `innowit_crm_v3` and failed writes do not roll back** **[CORRECTED]** | Owner: Frontend · Acceptance: failed mutation rolls back optimistic state and surfaces an error; localStorage holds only non-authoritative view preferences |
 | TD-002 | Add database indexes for custom field queries | Performance | MEDIUM |
 | TD-003 | Add pagination cursor for large datasets | Offset pagination has limits | MEDIUM |
 | TD-004 | Implement cache invalidation for analytics | Currently no cache | MEDIUM |
 | TD-005 | Add request/response logging middleware | Observability | LOW |
 | TD-006 | Add OpenAPI/Swagger documentation | Auto-generated from Zod | LOW |
-| TD-007 | Add E2E tests (Playwright) | Critical user flows | HIGH |
+| TD-007 | Add E2E tests (Playwright) | **DEFERRED — no Playwright config, no `e2e/` directory, no `@playwright/test` dependency exists** **[CORRECTED]** | HIGH | Owner: QA · Acceptance: Playwright installed, ≥1 critical CRM flow covered end-to-end against a running app |
 
 ---
 
@@ -160,23 +166,31 @@
 
 | Area | Ready | Notes |
 |---|---|---|
-| Backend API | ✅ | All endpoints implemented & tested |
-| Database Schema | ✅ | Migration applied, additive only |
+| Backend API | ✅ | All endpoints implemented; route surface source-verified |
+| Database Schema | ✅ | 4 Phase 3 migrations present (11 new models); applied status unverified in audit |
 | Authentication | ✅ | Uses existing JWT + tenant |
-| Authorization | ✅ | RBAC + tenant isolation |
-| Real-time | ⏳ | Needs frontend subscription |
-| Frontend | ⏳ | Currently localStorage only |
-| Mobile | ⏳ | Tauri config exists |
-| Documentation | ✅ | Complete |
-| Migration path | ✅ | Additive migration |
+| Authorization | ✅ | RBAC + tenant isolation; `authorize()` guards on premium routes |
+| Real-time | ❌ `DEFERRED` | RealtimeGateway emits no `crm.*` events; no CRM room subscription exists |
+| Frontend | ⚠️ `PARTIAL` | Server-backed reads with optimistic writes; localStorage cache persists full CRM records and failed writes do not roll back **[CORRECTED — was "Currently localStorage only"]** |
+| Premium UI | ❌ `DEFERRED` | Saved Views, Custom Fields, Import/Export, Workflow Builder and Commissions have no UI |
+| Mobile | ⏳ `DEFERRED` | Tauri config exists; no mobile build |
+| Documentation | ✅ | Reconciled 2026-11-23 |
+| Migration path | ✅ | Additive migrations only |
+| Test execution | ⚠️ `NOT_STARTED` | Suites inventoried (189 unique checks) but not run against a dedicated test database |
+
+**Correction note.** This checklist previously read "Frontend ⏳ Currently localStorage only" while TD-001 claimed the localStorage store had been replaced. Both statements were wrong in opposite directions. The accurate status is `PARTIAL`: server-authoritative on read, optimistic local cache on write with no rollback.
 
 ---
 
 ## 7. Phase 3 Sign-off
 
-**All committed items: DONE**  
-**Deferred items: Documented in backlog**  
-**Blockers: Documented & tracked separately**  
-**Technical debt: Prioritized for Phase 4**
+**Committed items: DONE (except TD-001 = PARTIAL)**  
+**Deferred items: DEFERRED, each with owner and acceptance criterion**  
+**Blockers: BLOCKED, tracked separately**  
+**Technical debt: prioritised for Phase 4**
 
-**Phase 3 CRM & Sales Pipeline: COMPLETE** ✅
+**Phase 3 CRM & Sales Pipeline: CONDITIONAL PASS**
+
+Conditional because: premium APIs are complete but four of five premium UIs are absent; CRM realtime is deferred; the frontend is `PARTIAL` rather than fully server-authoritative; and the 189-check test inventory has not been executed against a dedicated test database.
+
+Full rationale and open items: `docs/PHASE-3-RELEASE-RECONCILIATION.md`.

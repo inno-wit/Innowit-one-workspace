@@ -1,8 +1,10 @@
 # PHASE 3 ARCHITECTURE: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.0.0  
-**Date:** 2026-11-19  
-**Status:** As-Built  
+**Document Version:** 1.1.0
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23
+**Status:** As-Built / Reconciled
+
+> **Reconciliation notice (2026-11-23).** §5 describes a CRM realtime event catalog that is **not implemented**. Source inspection of `server/services/realtime/RealtimeGateway.ts` finds no `crm.*` emission, and no CRM room subscription exists in `src/services/realtime/SocketClient.ts`. The event catalog is retained as a **design contract**, not an as-built record. Corrections marked **[CORRECTED]**. Canonical record: `docs/PHASE-3-RELEASE-RECONCILIATION.md` §8.
 
 ---
 
@@ -185,8 +187,16 @@ CRMActivity created for:
 | `crm.quota.updated` | `{quotaId, userId}` | `org:{orgId}:crm` |
 | `crm.commission.calculated` | `{recordId, dealId, userId, amount}` | `org:{orgId}:crm` |
 
-**Publishing:** After transaction commit via `RealtimeGateway.emitToOrgRoom()`
-**Subscription:** Client subscribes to `org:{orgId}:crm` on CRM page load
+**Publishing:** ~~After transaction commit via `RealtimeGateway.emitToOrgRoom()`~~
+**Subscription:** ~~Client subscribes to `org:{orgId}:crm` on CRM page load~~
+
+**[CORRECTED 2026-11-23 — NOT IMPLEMENTED.]** Neither statement is true of the delivered code:
+
+- `RealtimeGateway.ts` emits only `message.*`, `conversation.*`, `typing.*`, `presence.*` and `meeting.*`. No `crm.*` event is published by any route handler.
+- No CRM view joins an `org:{orgId}:crm` room. `SocketClient.ts` has no CRM subscription path.
+- CRM state reaches the UI by REST fetch on mount (`CrmView.tsx:63–100`), not by event push.
+
+The table above is therefore a **forward specification** for RT-001…RT-006 (see `docs/PHASE-3-BACKLOG.md`), not a description of shipped behaviour.
 
 ---
 

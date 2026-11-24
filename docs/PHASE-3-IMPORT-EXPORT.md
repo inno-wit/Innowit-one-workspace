@@ -1,8 +1,17 @@
 # PHASE 3 IMPORT/EXPORT SPECIFICATION: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.0.0  
-**Date:** 2026-11-19  
-**Status:** As-Built  
+**Document Version:** 1.1.0
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23
+**Status:** As-Built (backend API) / UI `DEFERRED`
+
+> **Reconciliation notice (2026-11-23).** The import/export **API** exists in `server/routes/crmPremium.ts` (`/api/crm/premium/import`, `/import/:id`, `/export`) with permission guards, but it is **not fully functional**:
+>
+> - `POST /api/crm/premium/import` calls `prisma.importJob.findUnique(...)` and `prisma.importJob.create(...)` at `crmPremium.ts:711,720`. **No `ImportJob` model exists** in `prisma/schema.prisma` or in any migration, and a direct probe of the generated Prisma client returns `typeof prisma.importJob === 'undefined'`. The import route therefore throws `TypeError` at runtime and cannot persist a job.
+> - The dry-run branch is explicitly a placeholder: `// In a real implementation, this would parse the file and validate rows` / `// For now, return mock results` (`crmPremium.ts:735–736`).
+> - **No test covers import or export.** The 4 tests in `crm-premium.integration.test.ts` cover Saved Views (2), Custom Fields (1) and Automation Rule creation (1).
+> - There is **no import or export user interface**: a search of `src/components` finds no `ImportWizard`, `ExportDialog` or equivalent CRM component.
+>
+> This document is therefore an **API contract specification**, not a description of shipped behaviour. Tracked as FE-010 in `docs/PHASE-3-BACKLOG.md` and RC-09 in `docs/PHASE-3-RELEASE-RECONCILIATION.md`. **[CORRECTED]**
 
 ---
 

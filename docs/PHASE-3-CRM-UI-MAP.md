@@ -53,7 +53,7 @@ CrmView (src/components/views/CrmView.tsx)
 | Rep Leaderboard | `GET /api/crm/analytics/rep-performance` | Rep quotas, attainment |
 | Recent Activity | `GET /api/crm/analytics/activities` | Latest 5 CRMActivity |
 
-**Real-time Updates:** Subscribes to `org:{orgId}:crm` for deal/task updates
+**Real-time Updates:** **NOT IMPLEMENTED.** The original text claimed subscription to `org:{orgId}:crm`. Source inspection finds no CRM room join and no `crm.*` event emission from `RealtimeGateway`. **[CORRECTED]**
 
 ### 3.2 Customer Directory (`/crm/customers`)
 
@@ -93,7 +93,7 @@ CrmView (src/components/views/CrmView.tsx)
 | Create Deal | `POST /api/deals` | Modal |
 | Won/Lost Dialog | `POST /api/deals/:id/stage` with `closeOutcome` | DealOutcomeModal |
 
-**Real-time:** Subscribes to `crm.deal.stage.changed`, `crm.deal.closed`
+**Real-time:** **NOT IMPLEMENTED.** The original text claimed subscription to `crm.deal.stage.changed` and `crm.deal.closed`. Neither event is emitted by the server and no client subscription exists. **[CORRECTED]**
 
 ### 3.4 Tasks Manager (`/crm/tasks`)
 
@@ -108,40 +108,29 @@ CrmView (src/components/views/CrmView.tsx)
 
 ---
 
-## 4. Premium Capabilities UI
+## 4. Premium Capabilities — API only, no UI
 
-### 4.1 Saved Views
-| UI | API |
-|---|---|
-| Save Current View | `POST /api/crm/premium/saved-views` |
-| Load Saved View | `GET /api/crm/premium/saved-views/:id` |
-| Manage Views | `GET /api/crm/premium/saved-views` |
+> **Reconciled 2026-11-23.** The original §4 presented these as UI-to-API mappings. The APIs exist and are permission-guarded in `server/routes/crmPremium.ts`, but a search of `src/components` finds **no Saved View, Custom Field, Import/Export or Workflow Builder component**. These capabilities are reachable only by direct API call, not through the desktop UI. **[CORRECTED]**
 
-### 4.2 Custom Fields
-| UI | API |
-|---|---|
-| Define Fields (Admin) | `POST/PUT/DELETE /api/crm/premium/custom-fields/definitions` |
-| Set Field Values | `POST/PUT /api/crm/premium/custom-fields/values` |
-| Display in Forms/Grids | Client-side render from `CustomFieldValue` |
+| Capability | Backend API | Permission guard | Frontend UI |
+|---|---|---|---|
+| Saved Views | `GET/POST/PUT/DELETE /api/crm/saved-views` | `SUPER_ADMIN, ADMIN, SALES_MANAGER, SALES_REP` | **None — DEFERRED (FE-008)** |
+| Custom Fields (definitions) | `GET/POST/PUT/DELETE /api/crm/custom-fields/definitions` | `SUPER_ADMIN, ADMIN` | **None — DEFERRED (FE-009)** |
+| Custom Fields (values) | `GET/POST/PUT/DELETE /api/crm/custom-fields/values` | `SUPER_ADMIN, ADMIN, SALES_MANAGER, SALES_REP` | **None — DEFERRED (FE-009)** |
+| Import / Export | `/api/crm/premium/import`, `/export` | enforced | **None — DEFERRED (FE-010)** |
+| Workflow rules | `/api/crm/premium/workflows/*` | enforced | **None — DEFERRED (FE-011)** |
+| Sales rep performance / quotas | `/api/sales-reps/*` | enforced | Dashboard KPI cards only — **DEFERRED (FE-007)** |
 
-### 4.3 Import/Export
-| UI | API |
-|---|---|
-| Import Wizard | `POST /api/crm/premium/import` (dry-run first) |
-| Export Data | `POST /api/crm/premium/export` (CSV/JSON) |
-
-### 4.4 Workflow Automation
-| UI | API |
-|---|---|
-| Rule Builder (Admin) | `POST/PUT/DELETE /api/crm/premium/workflows/rules` |
-| Execution Logs | `GET /api/crm/premium/workflows/executions` |
-| Manual Trigger | `POST /api/crm/premium/workflows/rules/:id/execute` |
+Status vocabulary: `BACKEND_API_PASS` for all rows; `DEFERRED` for all UI rows.
 
 ---
 
 ## 5. State Management
 
-### 5.1 Client-Side Store (Zustand)
+> **Reconciled 2026-11-23.** The original §5 described a store that "persists to localStorage" and "syncs with server on mutations". Source inspection shows a more specific arrangement: the server is authoritative on read, while localStorage acts as an optimistic cache that survives API failure. See `docs/PHASE-3-RELEASE-RECONCILIATION.md` §6.
+
+### 5.1 Client-Side Store (Zustand-style, module-local)
+
 ```typescript
 // src/modules/crm/store.ts
 interface CrmState {
@@ -151,19 +140,32 @@ interface CrmState {
   tasks: TaskRecord[];
   salesReps: SalesRepRecord[];
   activityLogs: ActivityLogRecord[];
+  isServerSynced?: boolean;
 }
 ```
-- Persists to `localStorage` (key: `innowit_crm_v3`)
-- Hydrates on app load
-- Syncs with server on mutations (optimistic updates)
+
+Verified behaviour (`src/modules/crm/store.ts`, `src/components/views/CrmView.tsx`):
+
+| Property | Verified fact |
+|---|---|
+| Storage key | `innowit_crm_v3` (`store.ts:19`) |
+| What is stored | **Full CRM business records** — customers, contacts, deals, tasks, sales reps, activity logs (`store.ts:107–136`) |
+| Hydration order | localStorage first, then server replaces it on mount |
+| Server fetch | `fetchCrmStateFromServer()` in `CrmView.tsx:63–100`; sets `isServerSynced: true` on success |
+| On fetch failure | `serverError = 'Offline or fallback mode active'`; local cache remains and the UI shows a **"Local Cache Active"** badge (`CrmView.tsx:382`) |
+| Write path | API called first, then local state updated regardless of outcome |
+| On write failure | `console.warn('Could not persist customer to server, keeping optimistic local:', err)` — **local record stays, no rollback** (`CrmView.tsx:139–147`) |
+
+**Classification:** `SERVER_BACKED` for reads; `SERVER_BACKED_OPTIMISTIC` with `LOCAL_CACHE_NON_AUTHORITATIVE` fallback for writes. Not `LOCAL_ONLY`, and not "localStorage removed".
 
 ### 5.2 Server Synchronization
-| Client Action | Server Call | Optimistic Update |
-|---|---|---|
-| Create Customer | `POST /api/customers` | Add to `customers[]` immediately |
-| Update Deal Stage | `POST /api/deals/:id/stage` | Move card in Kanban |
-| Complete Task | `POST /api/tasks/:id/complete` | Toggle checkbox |
-| Create Deal | `POST /api/deals` | Add to stage column |
+
+| Client Action | Server Call | Optimistic Update | Rollback on failure |
+|---|---|---|---|
+| Create Customer | `POST /api/customers` | Add to `customers[]` immediately | **No** |
+| Update Deal Stage | `POST /api/deals/:id/stage` | Move card in Kanban | **No** |
+| Complete Task | `POST /api/tasks/:id/complete` | Toggle checkbox | **No** |
+| Create Deal | `POST /api/deals` | Add to stage column | **No** |
 
 ---
 

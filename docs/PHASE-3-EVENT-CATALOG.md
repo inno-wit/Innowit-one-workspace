@@ -1,10 +1,12 @@
 # PHASE 3 EVENT CATALOG: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.0.0  
-**Date:** 2026-11-19  
-**Status:** As-Built  
-**Transport:** Socket.IO via Phase 2 `RealtimeGateway`  
-**Namespace:** `/crm`  
+**Document Version:** 1.1.0
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23
+**Status:** **Contract specification — NOT an implementation record**
+**Transport:** Socket.IO via Phase 2 `RealtimeGateway`
+**Namespace:** `/crm`
+
+> **Reconciliation notice (2026-11-23).** This document was previously headed "Status: As-Built", which implied the events below are emitted by the running system. They are not. Source inspection of `server/services/realtime/RealtimeGateway.ts` finds no `crm.*` emission, and no CRM room join exists in `src/services/realtime/SocketClient.ts` or any CRM view. This catalog is a **forward design contract** for RT-001…RT-006 in `docs/PHASE-3-BACKLOG.md`. The room model in §9 and the client example in §11 describe intended behaviour, not shipped behaviour. **[CORRECTED]** Canonical record: `docs/PHASE-3-RELEASE-RECONCILIATION.md` §8.
 
 ---
 

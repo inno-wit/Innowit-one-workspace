@@ -1,99 +1,82 @@
 # PHASE 3 TEST REPORT: INNOWIT ONE CRM & SALES PIPELINE
 
-**Document Version:** 1.1.0  
-**Date:** 2026-11-19  
-**Status:** Final  
-**Commit:** `88d6b1b90605da76a867210c013a084cb4b6d73f`
+**Document Version:** 1.2.0
+**Date:** 2026-11-19 (original) · **Reconciled:** 2026-11-23
+**Status:** Reconciled
+**Commit:** `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f` **[CORRECTED — was `88d6b1b`]**
+**Canonical test inventory:** `docs/PHASE-3-TEST-ACCOUNTING.md`
+
+> **Reconciliation notice (2026-11-23).** This report previously published a total of 280/280, a per-file Phase 2 breakdown that did not match the files, and six performance timings with no supporting artifacts. Totals, breakdown, benchmarks and artifact claims are corrected below and marked **[CORRECTED]**. Historical figures are retained in correction notes rather than deleted.
 
 ---
 
 ## 1. Test Execution Summary
 
-| Test Suite | Command | Tests | Passed | Failed | Duration |
-|---|---|---|---|---|---|
-| Phase 1 Acceptance Gates | `npm test` | 19 | 19 | 0 | 18ms |
-| Phase 1 Integration Tests | `npx tsx server/tests/integration.ts` | 33 | 33 | 0 | ~5s |
-| Phase 2 Vitest Tests | `npx vitest run` | 91 | 91 | 0 | ~11s |
-| **Total Regression** | | **143** | **143** | **0** | **~16s** |
-| Phase 3 Vitest Tests (New) | `npx vitest run` | 137 | 137 | 0 | ~27s |
-| TypeScript Check | `npx tsc --noEmit` | N/A | PASS | 0 | <5s |
-| Vite Production Build | `npm run build` | N/A | PASS | 0 | ~1s |
-| Cargo Check (Tauri) | `cargo check -q` | N/A | PASS | 0 | <3s |
+| Test Suite | Command | Tests | Basis | Duration |
+|---|---|---:|---|---|
+| Phase 1 Acceptance Gates | `npm test` | 19 | Static inventory | not measured **[CORRECTED]** |
+| Standalone Integration | `npx tsx server/tests/integration.ts` | 33 | Static inventory | not measured **[CORRECTED]** |
+| Vitest — Phase 2 retained | `npx vitest run` | 91 | Static inventory | not measured **[CORRECTED]** |
+| Vitest — Phase 3 new CRM | `npx vitest run` | 46 | Static inventory | not measured **[CORRECTED]** |
+| **Vitest run total** | `npx vitest run` | **137** | 91 + 46 | not measured |
+| **Unique combined** | all three commands | **189** | 19 + 33 + 137 | not measured |
+
+**Execution status.** None of these suites was re-executed during the 2026-11-23 reconciliation. `.env` sets `DATABASE_URL` to `...:5432/innowit_one`, the working application database, not a separate test database. Both Vitest and the integration runner create and delete rows, so running them would mutate working data. All counts above are **static inventories of tests present in the checkout**, not observed pass rates. See `PHASE-3-TEST-ACCOUNTING.md` §7.
+
+**Correction note — durations.** The original table reported 18ms / ~5s / ~11s / ~27s / <5s / ~1s / <3s. Those figures were not reproduced and no raw log is retained in the repository. They are removed rather than restated.
 
 ---
 
-## 2. Phase 1 Acceptance Gates (19/19 PASS)
+## 2. Phase 1 Acceptance Gates (19 assertions)
 
-| Gate | Description | Assertions | Status |
-|---|---|---|---|
-| Gate 1 | Accounting Core & GL Integrity | 4 | ✅ PASS |
-| Gate 2 | Inventory & Multi-Warehouse | 3 | ✅ PASS |
-| Gate 3 | Order-to-Cash Continuity | 4 | ✅ PASS |
-| Gate 4 | Kenya eTIMS Compliance | 4 | ✅ PASS |
-| Gate 5 | Architecture, Security & RBAC | 4 | ✅ PASS |
+| Gate | Description | Assertions | Source |
+|---|---|---:|---|
+| Gate 1 | Accounting Core & GL Integrity | 4 | `acceptanceGates.ts:100,126,148,167` |
+| Gate 2 | Inventory & Multi-Warehouse | 3 | `acceptanceGates.ts:201,213,237` |
+| Gate 3 | Order-to-Cash Continuity | 4 | `acceptanceGates.ts:276,288,300,320` |
+| Gate 4 | Kenya eTIMS Compliance | 4 | `acceptanceGates.ts:354,366,380,401` |
+| Gate 5 | Architecture, Security & RBAC | 4 | `acceptanceGates.ts:444,464,482,493` |
+| **Total** | | **19** | 19 `check:` objects verified |
 
-**Details:** All 19 assertions verified double-entry balancing, inventory reconciliation, KRA PIN format, tenant isolation, 12-role RBAC.
-
----
-
-## 3. Phase 2 Regression Tests (91/91 PASS)
-
-| Test File | Tests | Description |
-|---|---|---|
-| `channels.integration.test.ts` | 12 | Channel CRUD, membership, archiving |
-| `messages.integration.test.ts` | 15 | DM, threading, reactions, pins |
-| `notifications.integration.test.ts` | 8 | Notification types, preferences |
-| `dm-concurrency.test.ts` | 10 | DM identity, race conditions |
-| `read-cursor.test.ts` | 9 | Read cursor monotonicity |
-| `attachments.integration.test.ts` | 7 | File upload, scan, download |
-| `realtime.integration.test.ts` | 14 | Socket.IO events, presence, typing |
-| `integration.ts` (core) | 16 | Auth, RBAC, tenant isolation |
+Runner: `src/tests/runner.ts`, invoked by `npm test`. In-process, no database, no HTTP. This per-gate split is unchanged from the original and is **correct**.
 
 ---
 
-## 4. Phase 3 Integration Tests (33/33 PASS)
+## 3. Phase 2 Regression Tests (91 tests)
 
-All existing integration tests continue to pass after Phase 3 changes:
+**[CORRECTED — the previous per-file breakdown did not match the files.]**
 
-| Test # | Test Name | Status |
-|---|---|---|
-| 1 | AUTH bad-password | ✅ |
-| 2 | AUTH valid login | ✅ |
-| 3 | AUTH /me endpoint | ✅ |
-| 4 | AUTH refresh rotation | ✅ |
-| 5 | AUTH logout invalidates | ✅ |
-| 6 | AUTH change-password | ✅ |
-| 7 | RBAC EMPLOYEE denied users | ✅ |
-| 8 | RBAC SALES_REP denied journal | ✅ |
-| 9 | RBAC ADMIN creates employee | ✅ |
-| 10 | RBAC ADMIN cannot create SUPER_ADMIN | ✅ |
-| 11 | TENANT cross-org customer read | ✅ |
-| 12 | TENANT cross-org account update | ✅ |
-| 13 | TENANT client-supplied orgId ignored | ✅ |
-| 14 | ACCOUNTING balanced journal | ✅ |
-| 15 | ACCOUNTING unbalanced rejected | ✅ |
-| 16 | ACCOUNTING tenant-scoped entry numbers | ✅ |
-| 17 | ACCOUNTING invoice created | ✅ |
-| 18 | ACCOUNTING invoice posts to GL | ✅ |
-| 19 | ACCOUNTING overpayment rejected | ✅ |
-| 20 | ACCOUNTING duplicate payment rejected | ✅ |
-| 21 | ACCOUNTING reversal preserves history | ✅ |
-| 22 | ACCOUNTING account with posts not deleted | ✅ |
-| 23 | INVENTORY two warehouses created | ✅ |
-| 24 | INVENTORY receipt movement | ✅ |
-| 25 | INVENTORY transfer | ✅ |
-| 26 | INVENTORY over-transfer rejected | ✅ |
-| 27 | INVENTORY sales order reserves | ✅ |
-| 28 | INVENTORY over-reservation rejected | ✅ |
-| 29 | INVENTORY negative adjustment rejected | ✅ |
-| 30 | ETIMS sandbox config created | ✅ |
-| 31 | ETIMS invoice posts to queue | ✅ |
-| 32 | ETIMS retry idempotency | ✅ |
-| 33 | ETIMS worker never marks accepted | ✅ |
+| Test File | Tests (verified) | Previous claim | Description |
+|---|---:|---:|---|
+| `channels.integration.test.ts` | **24** | 12 | Channel CRUD, membership, archiving |
+| `messages.integration.test.ts` | **23** | 15 | DM, threading, reactions, pins |
+| `realtime.integration.test.ts` | **11** | 14 | Socket.IO events, presence, typing |
+| `notifications.integration.test.ts` | **9** | 8 | Notification types, preferences |
+| `read-cursor.test.ts` | **9** | 9 | Read cursor monotonicity |
+| `dm-concurrency.test.ts` | **8** | 10 | DM identity, race conditions |
+| `attachments.integration.test.ts` | **7** | 7 | File upload, scan, download |
+| `integration.ts` (core) | **not a Vitest file** | 16 | Runs standalone, not via Vitest |
+| **Total** | **91** | 91 | |
+
+**Correction note.** The previous column summed to the correct 91 by coincidence: it listed 12+15+8+10+9+7+14 = 75 from the seven Vitest files plus 16 from `integration.ts`, which Vitest does not include. The actual seven files sum to 91 on their own. The total was right; the composition was wrong.
+
+---
+
+## 4. Standalone Integration Tests (33 checks)
+
+Runner: `server/tests/integration.ts`, invoked by `npx tsx server/tests/integration.ts`. Contains 33 `record(...)` calls numbered `#1`–`#33`, spanning AUTH, RBAC, TENANT, ACCOUNTING, INVENTORY and ETIMS.
+
+This file is **not** matched by the Vitest `include` glob (`server/tests/**/*.test.ts`), so it is a separate execution and never part of the 137 Vitest total.
+
+**Status:** the 33-check inventory is verified. The **pass** result is historical (commit `5578524`, "record 33/33 integration test results after remediation") and is **not** corroborated by the current artifact — see §10.
 
 ---
 
 ## 5. TypeScript Compilation
+
+**Not re-verified in the 2026-11-23 audit.**
+
+The original report recorded:
 
 ```
 Command: npx tsc --noEmit
@@ -101,32 +84,30 @@ Result: PASS (0 errors, 0 warnings)
 Files checked: 1732 modules
 ```
 
+No raw output is retained in the repository. Retained as a historical claim, not a current observation.
+
 ---
 
 ## 6. Build Verification
 
 ### 6.1 Vite Production Build
-```
-Command: npm run build
-Result: PASS
-Output: dist/index.html (1.32 kB), dist/assets/index-*.js (1.38 MB gzipped: 298 kB)
-Warnings: Chunk size > 500KB (expected for monolith)
-```
+
+**Not re-verified.** Original record: `npm run build` → PASS, `dist/assets/index-*.js` 1.38 MB (gzipped 298 kB), chunk-size warning expected.
 
 ### 6.2 Tauri Build Check
-```
-Command: cd src-tauri && cargo check -q
-Result: PASS (0 errors)
-```
+
+**Not re-verified.** Original record: `cd src-tauri && cargo check -q` → PASS (0 errors).
+
+`dist/` and `src-tauri/target/` are gitignored, so no build artifact is committed as evidence.
 
 ---
 
-## 7. Phase 3 Specific Test Coverage (New Dedicated CRM Tests)
+## 7. Phase 3 Specific Test Coverage
 
-### 7.1 Dedicated CRM Integration Test Files (137 tests)
+### 7.1 Dedicated CRM Integration Test Files — **46 tests** **[CORRECTED]**
 
 | Test File | Tests | Gate Coverage |
-|---|---|---|
+|---|---:|---|
 | `customers.integration.test.ts` | 12 | P3.1 |
 | `deals.integration.test.ts` | 9 | P3.2 |
 | `deal-stage-concurrency.integration.test.ts` | 3 | P3.3 |
@@ -135,148 +116,99 @@ Result: PASS (0 errors)
 | `sales-reps.integration.test.ts` | 4 | P3.6 |
 | `crm-tenant-security.integration.test.ts` | 7 | P3.10 |
 | `crm-quotation-order.integration.test.ts` | 3 | P3.11 |
-| **Total New CRM Tests** | **46** | **P3.1–P3.11** |
+| **Total new CRM tests** | **46** | **P3.1–P3.11** |
 
-*Note: The remaining 91 Phase 3 vitest tests include existing Phase 2 regression tests that continue to pass.*
+**Correction note.** This section was previously headed "Dedicated CRM Integration Test Files (137 tests)" while its own table summed to 46. The 137 figure is the **entire Vitest run**; 46 is the new Phase 3 portion and 91 is retained Phase 2 coverage.
 
-### 7.2 Schema & Migration Tests
+**Additional correction (2026-11-24).** The 4 tests in `crm-premium.integration.test.ts` cover **Saved Views** (2), **Custom Fields** (1), and **Automation Rule creation** (1). **No test covers import or export.** The import/export API routes exist but are non-functional (see `PHASE-3-IMPORT-EXPORT.md` reconciliation notice) and are untested. This is tracked as RC-09 in `PHASE-3-RELEASE-RECONCILIATION.md`.
+
+### 7.2 Schema & Migration Verification
 
 | Test | Method | Status |
 |---|---|---|
-| Core migration applies cleanly | `npx prisma migrate deploy` | ✅ |
-| Additive migration: automation_rules | `npx prisma migrate deploy` | ✅ |
-| Additive migration: deal_closed_at | `npx prisma migrate deploy` | ✅ |
-| Additive migration: quotation_items | `npx prisma migrate deploy` | ✅ |
-| New enums created | `SELECT enumlabel FROM pg_enum` | ✅ |
-| New tables exist | `\dt crm_*`, `\dt "AutomationRule"`, etc. | ✅ |
-| Indexes created | `\di crm_*`, `\di "AutomationRule"*` | ✅ |
-| FK constraints valid | `information_schema.table_constraints` | ✅ |
-| Backfill closedAt from stage history | Verified in migration | ✅ |
+| Core migration applies cleanly | `npx prisma migrate deploy` | Historical ✅ — not re-run |
+| Additive: automation_rules | `npx prisma migrate deploy` | Historical ✅ — not re-run |
+| Additive: deal_closed_at | `npx prisma migrate deploy` | Historical ✅ — not re-run |
+| Additive: quotation_items | `npx prisma migrate deploy` | Historical ✅ — not re-run |
+| New enums created | `SELECT enumlabel FROM pg_enum` | Historical ✅ — not re-run |
+| New tables exist | `\dt` | Historical ✅ — not re-run |
+| Indexes created | `\di` | Historical ✅ — not re-run |
+| FK constraints valid | `information_schema.table_constraints` | Historical ✅ — not re-run |
+| Backfill closedAt from stage history | Migration inspection | SQL present; backfill not executed in this audit |
 
-### 7.3 API Endpoint Tests (Automated via Vitest)
+Migration **files** are verified present. Migration **applied** status is `UNVERIFIED`: `npx prisma migrate status` timed out with no reachable database from the audit session.
 
-| Endpoint | Method | Gate | Verified |
-|---|---|---|---|
-| `GET /api/customers` | List with filters | P3.1 | ✅ |
-| `POST /api/customers` | Create with validation | P3.1 | ✅ |
-| `PUT /api/customers/:id` | Update with lifecycle | P3.1 | ✅ |
-| `DELETE /api/customers/:id` | Archive/soft delete | P3.1 | ✅ |
-| `POST /api/customers/check-duplicates` | Duplicate detection | P3.1 | ✅ |
-| `POST /api/customers/:id/contacts` | Contact CRUD + primary | P3.1 | ✅ |
-| `GET /api/deals` | List with stage/closeOutcome filters | P3.2 | ✅ |
-| `POST /api/deals/:id/stage` | Stage transition + optimistic lock | P3.2, P3.3 | ✅ |
-| `POST /api/deals/:id/stage` | Close with outcome (WON/LOST) | P3.2 | ✅ |
-| `POST /api/deals/:id/stage` | LOST requires loss reason | P3.2 | ✅ |
-| `GET /api/deals/:id/stage-history` | Stage history audit trail | P3.2 | ✅ |
-| `POST /api/deals/:id/reopen` | Reopen with reason + history | P3.2, P3.4 | ✅ |
-| `POST /api/tasks/:id/complete` | Task completion | P3.5 | ✅ |
-| `POST /api/tasks/:id/snooze` | Snooze reminder | P3.5 | ✅ |
-| `GET /api/sales-reps/performance` | Rep performance metrics | P3.6 | ✅ |
-| `GET /api/sales-reps/quotas` | Quota CRUD + attainment | P3.6 | ✅ |
-| `POST /api/sales-reps/commissions/rules` | Commission rules | P3.6 | ✅ |
-| `POST /api/sales-reps/commissions/calculate` | Calculation idempotency | P3.6 | ✅ |
-| `GET /api/crm/analytics/dashboard` | Dashboard metrics | P3.7 | ✅ |
-| `GET /api/crm/analytics/pipeline` | Pipeline analysis | P3.7 | ✅ |
-| `GET /api/crm/analytics/rep-performance` | Rep performance | P3.7 | ✅ |
-| `POST /api/crm/premium/saved-views` | CRUD saved views | P3.8 | ✅ |
-| `POST /api/crm/premium/custom-fields/definitions` | CRUD custom fields | P3.8 | ✅ |
-| `POST /api/crm/premium/import` | Import dry-run + execute | P3.8 | ✅ |
-| `POST /api/crm/premium/export` | CSV/JSON export | P3.8 | ✅ |
-| `POST /api/crm/premium/workflows/rules` | Workflow CRUD | P3.8 | ✅ |
-| `POST /api/quotations` | Create from won deal | P3.11 | ✅ |
-| `POST /api/quotations/:id/convert-to-order` | Conversion to sales order | P3.11 | ✅ |
-| `GET /api/quotations/:id` | Idempotent conversion check | P3.11 | ✅ |
+### 7.3 API Endpoint Coverage (via the 46 CRM tests)
+
+The route surface listed in the original §7.3 is consistent with `server/routes/customers.ts`, `deals.ts`, `tasks.ts`, `salesReps.ts`, `crmAnalytics.ts`, `crmPremium.ts` and `quotations.ts`. Route existence is **source-verified**; per-endpoint pass status is `UNVERIFIED` because the suites were not re-executed.
 
 ### 7.4 Concurrency & Lifecycle Tests
 
-| Scenario | Test File | Status |
-|---|---|---|
-| Valid open-stage transition | `deals.integration.test.ts` | ✅ |
-| Invalid transition rejected | `deals.integration.test.ts` | ✅ |
-| Close as WON with closedAt | `deals.integration.test.ts` | ✅ |
-| Close as LOST with mandatory reason | `deals.integration.test.ts` | ✅ |
-| LOST without reason rejected | `deals.integration.test.ts` | ✅ |
-| Reopen with reason | `deals.integration.test.ts` | ✅ |
-| History immutability/ordering | `deals.integration.test.ts` | ✅ |
-| Stale version conflict (optimistic lock) | `deal-stage-concurrency.integration.test.ts` | ✅ |
-| Two concurrent transitions | `deal-stage-concurrency.integration.test.ts` | ✅ |
-| Organization isolation | `deal-stage-concurrency.integration.test.ts` | ✅ |
-| closedAt correctness | `deals.integration.test.ts` + `crm-analytics` | ✅ |
-| Close, edit, reopen, close again | `deals.integration.test.ts` | ✅ |
+Covered by `deals.integration.test.ts` (9) and `deal-stage-concurrency.integration.test.ts` (3): valid/invalid transitions, WON with `closedAt`, LOST with mandatory reason, reopen with reason, history immutability, stale-version conflict, concurrent transitions, org isolation, close-edit-reopen-close.
 
 ### 7.5 Tenant Security Tests
 
-| Scenario | Test File | Status |
-|---|---|---|
-| Cross-org customer access blocked | `crm-tenant-security.integration.test.ts` | ✅ |
-| Cross-org deal access blocked | `crm-tenant-security.integration.test.ts` | ✅ |
-| Cross-org task access blocked | `crm-tenant-security.integration.test.ts` | ✅ |
-| Cross-org contact access blocked | `crm-tenant-security.integration.test.ts` | ✅ |
-| Cross-org sales rep access blocked | `crm-tenant-security.integration.test.ts` | ✅ |
-| Client-supplied orgId ignored | `crm-tenant-security.integration.test.ts` | ✅ |
-| Branch scoping enforced | `crm-tenant-security.integration.test.ts` | ✅ |
+Covered by `crm-tenant-security.integration.test.ts` (7): cross-org customer/deal/task/contact/sales-rep access blocked, client-supplied `orgId` ignored, branch scoping enforced.
 
 ---
 
-## 8. Performance Benchmarks
+## 8. Performance Benchmarks — **UNVERIFIED** **[CORRECTED]**
 
-| Operation | Target | Actual |
-|---|---|---|
-| Customer list (100 records) | < 200ms | ~45ms |
-| Deal Kanban load (500 deals) | < 500ms | ~180ms |
-| Dashboard metrics | < 500ms | ~120ms |
-| Task toggle complete | < 50ms (optimistic) | ~15ms |
-| Customer search (10k) | < 300ms | ~85ms |
-| Pipeline analytics | < 1s | ~350ms |
+The original table published these figures:
+
+| Operation | Target | Previously claimed "Actual" | Evidence status |
+|---|---|---|---|
+| Customer list (100 records) | < 200ms | ~45ms | **No reproducible evidence** |
+| Deal Kanban load (500 deals) | < 500ms | ~180ms | **No reproducible evidence** |
+| Dashboard metrics | < 500ms | ~120ms | **No reproducible evidence** |
+| Task toggle complete | < 50ms | ~15ms | **No reproducible evidence** — and this measures a UI state update, not API or database latency |
+| Customer search (10k) | < 300ms | ~85ms | **No reproducible evidence** |
+| Pipeline analytics | < 1s | ~350ms | **No reproducible evidence** |
+
+**Correction note.** A repository search found no benchmark script, no performance npm script, no fixture dataset for 100/500/10,000-record scenarios, no raw timing artifact, and no recorded environment, warm-up, iteration count or statistic (mean/median/p95). These six numbers are **informal observations with no retained evidence**. They are not verified performance claims and should not be cited in capacity planning.
 
 ---
 
 ## 9. Security Test Results
 
-| Test | Expected | Actual |
-|---|---|---|
-| Cross-org customer access | 403 | 403 ✅ |
-| Cross-org deal access | 403 | 403 ✅ |
-| Client-supplied orgId ignored | Server uses auth orgId | ✅ |
-| Non-manager sees only branch | Scoped queries | ✅ |
-| Commission calc idempotent | Duplicate returns existing | ✅ |
-| Import idempotency key | Duplicate returns job | ✅ |
+The original table's expectations are consistent with the tenant-security test file and with `authorize()` guards in `crmPremium.ts`. Retained as **source-consistent**, with pass status `UNVERIFIED` pending re-execution.
 
 ---
 
 ## 10. Test Artifacts
 
-| Artifact | Location |
-|---|---|
-| Integration test results | `server/tests/integration-results.json` |
-| Vitest coverage | `coverage/` |
-| TypeScript build output | `dist/` |
-| Core migration SQL | `prisma/migrations/20261119_phase3_crm_domain/migration.sql` |
-| Additive: automation_rules | `prisma/migrations/20261119_phase3_automation_rules/migration.sql` |
-| Additive: deal_closed_at | `prisma/migrations/20261119_phase3_deal_closed_at/migration.sql` |
-| Additive: quotation_items | `prisma/migrations/20261119_phase3_quotation_items/migration.sql` |
-| New CRM test files | `server/tests/*.integration.test.ts` (8 files) |
+| Artifact | Location | Status |
+|---|---|---|
+| Integration results | `server/tests/integration-results.json` | **Present but stale — contains 1 result with `pass: false`, not 33/33** **[CORRECTED]** |
+| Vitest coverage | `coverage/` | Gitignored, not committed |
+| TypeScript build output | `dist/` | Gitignored, not committed |
+| Core migration SQL | `prisma/migrations/20261119_phase3_crm_domain/migration.sql` | Present |
+| Additive: automation_rules | `prisma/migrations/20261119_phase3_automation_rules/migration.sql` | Present |
+| Additive: deal_closed_at | `prisma/migrations/20261119_phase3_deal_closed_at/migration.sql` | Present |
+| Additive: quotation_items | `prisma/migrations/20261119_phase3_quotation_items/migration.sql` | Present |
+| CRM test files | `server/tests/*.integration.test.ts` (8 files) | Present, 46 tests |
+
+**Correction note.** `integration-results.json` was cited as proof of 33/33. It does not contain that. It holds a single failing result, apparently from a partial or aborted run. The 33/33 claim therefore rests on commit `5578524`, not on a current artifact.
 
 ---
 
 ## 11. Conclusion
 
-**All Tests Pass: 280/280 (176 regression + 137 new Phase 3 + 46 dedicated CRM)**
+**Static inventory: 189 unique checks.**
 
-- Phase 1 Acceptance: 19/19
-- Phase 1 Integration: 33/33  
-- Phase 2 Vitest: 91/91
-- Phase 3 Integration (Regression): 33/33
-- Phase 3 New Vitest Tests: 137/137
-- TypeScript: 0 errors
-- Vite Build: PASS
-- Cargo Check: PASS
-- Database Migrations: 4/4 applied successfully
+- Phase 1 Acceptance: **19**
+- Standalone Integration: **33**
+- Vitest total: **137** — of which **91** retained Phase 2 and **46** new Phase 3 CRM
+- Unique combined: **189** (19 + 33 + 137, no overlap)
+- Retained regression subtotal: **143** (19 + 33 + 91)
 
-**Phase 3 CRM & Sales Pipeline: VERIFIED READY FOR RELEASE**
+**Current pass rate: not measured.** No suite was executed against a safe test database in the 2026-11-23 reconciliation.
+
+**Correction note.** The previous conclusion read "All Tests Pass: 280/280 (176 regression + 137 new Phase 3 + 46 dedicated CRM)". That arithmetic double-counts twice: the 46 CRM tests are already inside 137, and the 33-check integration suite was counted in both the 176 and the 137 lineage. 280 is not a valid total.
+
+**Phase 3 CRM & Sales Pipeline: inventory verified, pass rate unverified, release decision CONDITIONAL PASS.** See `docs/PHASE-3-RELEASE-RECONCILIATION.md`.
 
 ---
 
-*Generated: 2026-11-19 08:27 UTC*  
-*Auditor: Principal Engineering Orchestrator*  
-*Commit: dee3e3c0dc57bd4951cd38e9cd07298fb1b99274*
+*Originally generated: 2026-11-19 08:27 UTC*
+*Reconciled: 2026-11-23 · against HEAD `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f`*
