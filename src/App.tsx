@@ -29,8 +29,15 @@ import { AuditLogsView } from '@/components/views/AuditLogsView';
 import { Phase8HardeningView } from '@/components/views/Phase8HardeningView';
 import { ProductionSwitchModal } from '@/components/etims/ProductionSwitchModal';
 import { loadErpState, saveErpState, ErpState } from '@/modules/erp/store';
-import { loadCrmState } from '@/modules/crm/store';
 import { loadAuditLogs, logAuditEntry } from '@/modules/audit/store';
+import {
+  SEED_CUSTOMERS,
+  SEED_CONTACTS,
+  SEED_DEALS,
+  SEED_TASKS,
+  SEED_SALES_REPS,
+  SEED_ACTIVITY_LOGS,
+} from '@/data/crmSeed';
 import {
   loadAirGapStatus,
   lockSandboxAirGap,
@@ -94,6 +101,7 @@ import {
   AutomationRule,
   AutomationExecutionLog,
   SystemNotification,
+  DealRecord,
 } from '@/types';
 import { canViewModule } from '@/modules/auth/rbac';
 
@@ -113,14 +121,13 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<UserSessionPayload>(SEED_USERS[0]); // default Super Admin
   const [isSandbox, setIsSandbox] = useState<boolean>(() => loadAirGapStatus().environment === 'SANDBOX');
 
-  const crmState = useMemo(() => loadCrmState(), []);
-
   // Kernel State Stores
   const [accounts, setAccounts] = useState<Account[]>(DEFAULT_ACCOUNTS);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(DEFAULT_JOURNAL_ENTRIES);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>(SEED_INVOICES);
   const [etimsRecords, setEtimsRecords] = useState<EtimsRecord[]>(DEFAULT_ETIMS_RECORDS);
-  const [customers, setCustomers] = useState<CustomerRecord[]>(() => crmState.customers || DEFAULT_CUSTOMERS);
+  const [customers, setCustomers] = useState<CustomerRecord[]>(SEED_CUSTOMERS);
+  const [deals, setDeals] = useState<DealRecord[]>(SEED_DEALS);
   const [products, setProducts] = useState<ProductRecord[]>(DEFAULT_PRODUCTS);
 
   // eTIMS Compliance Engine State (Phase 6)
@@ -150,7 +157,7 @@ export default function App() {
     const result = executeAutomationsEngine({
       products,
       invoices,
-      deals: crmState.deals,
+      deals,
       purchaseOrders: erpState.purchaseOrders,
       etimsQueue,
       payrollRuns: erpState.payrollRuns,
@@ -1120,6 +1127,7 @@ export default function App() {
           currentPath={currentPath}
           onNavigate={(path: string) => setCurrentPath(path)}
           onSyncCustomers={(updated) => setCustomers(updated)}
+          onSyncDeals={(updated) => setDeals(updated)}
         />
       );
     }
@@ -1210,7 +1218,7 @@ export default function App() {
           invoices={invoices}
           products={products}
           customers={customers}
-          deals={crmState.deals}
+          deals={deals}
           suppliers={erpState.suppliers}
           supplierBills={erpState.supplierBills}
           employees={erpState.employees}
@@ -1341,7 +1349,7 @@ export default function App() {
         invoices={invoices}
         products={products}
         employees={erpState.employees}
-        deals={crmState.deals}
+        deals={deals}
         onTriggerAutomations={handleRunAutomations}
       />
 

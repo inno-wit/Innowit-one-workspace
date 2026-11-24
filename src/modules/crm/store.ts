@@ -16,7 +16,21 @@ import {
 } from '@/data/crmSeed';
 import { apiClient } from '@/services/api/apiClient';
 
-const STORAGE_KEY = 'innowit_crm_v3';
+// ============================================================================
+// STORAGE KEYS — Only for non-authoritative UI preferences
+// ============================================================================
+
+const UI_PREFS_KEY = 'innowit_crm_ui_prefs_v1';
+
+export interface CrmUiPrefs {
+  activeTab?: string;
+  customerFilters?: Record<string, any>;
+  dealFilters?: Record<string, any>;
+  taskFilters?: Record<string, any>;
+  columnLayouts?: Record<string, string[]>;
+  lastViewedCustomerId?: string;
+  lastViewedDealId?: string;
+}
 
 export interface CrmState {
   customers: CustomerRecord[];
@@ -25,7 +39,9 @@ export interface CrmState {
   tasks: TaskRecord[];
   salesReps: SalesRepRecord[];
   activityLogs: ActivityLogRecord[];
-  isServerSynced?: boolean;
+  isServerSynced: boolean;
+  // Mutation tracking for optimistic UI with rollback
+  pendingMutations: Map<string, { type: string; previousState: any; timestamp: number }>;
 }
 
 export function mapServerCustomer(c: any): CustomerRecord {
@@ -102,77 +118,76 @@ export function mapServerTask(t: any): TaskRecord {
   };
 }
 
-export function loadCrmState(): CrmState {
+// ============================================================================
+// UI PREFERENCES (Non-authoritative, safe for localStorage)
+// ============================================================================
+
+export function loadUiPrefs(): CrmUiPrefs {
   try {
     if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(UI_PREFS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.customers && parsed.deals && parsed.tasks) {
-          return parsed;
-        }
+        return JSON.parse(raw);
       }
     }
   } catch (err) {
-    console.warn('Failed to load CRM state from localStorage:', err);
+    console.warn('Failed to load CRM UI prefs from localStorage:', err);
   }
-
-  return {
-    customers: SEED_CUSTOMERS,
-    contacts: SEED_CONTACTS,
-    deals: SEED_DEALS,
-    tasks: SEED_TASKS,
-    salesReps: SEED_SALES_REPS,
-    activityLogs: SEED_ACTIVITY_LOGS,
-    isServerSynced: false,
-  };
+  return {};
 }
 
-export function saveCrmState(state: CrmState): void {
+export function saveUiPrefs(prefs: CrmUiPrefs): void {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify(prefs));
   } catch (err) {
-    console.warn('Failed to save CRM state to localStorage:', err);
+    console.warn('Failed to save CRM UI prefs to localStorage:', err);
   }
 }
 
 // ============================================================================
-// SERVER ASYNC SYNC METHODS
+// SERVER SYNC — Authoritative source of truth
 // ============================================================================
 
 export async function fetchCrmStateFromServer(): Promise<Partial<CrmState>> {
   const result: Partial<CrmState> = {};
 
   try {
-    const custRes = await apiClient.getCustomers({ limit: 100 });
+    const custRes = await apiClient.getCustomers({ limit: 500 });
     if (custRes?.data) {
       result.customers = custRes.data.map(mapServerCustomer);
     }
   } catch (e) {
-    console.warn('Failed to load customers from server:', e);
+    console.error('Failed to load customers from server:', e);
+    throw new Error('Failed to load customers from server');
   }
 
   try {
-    const dealsRes = await apiClient.getDeals({ limit: 100 });
+    const dealsRes = await apiClient.getDeals({ limit: 500 });
     if (dealsRes?.data) {
       result.deals = dealsRes.data.map(mapServerDeal);
     }
   } catch (e) {
-    console.warn('Failed to load deals from server:', e);
+    console.error('Failed to load deals from server:', e);
+    throw new Error('Failed to load deals from server');
   }
 
   try {
-    const tasksRes = await apiClient.getTasks({ limit: 100 });
+    const tasksRes = await apiClient.getTasks({ limit: 500 });
     if (tasksRes?.data) {
       result.tasks = tasksRes.data.map(mapServerTask);
     }
   } catch (e) {
-    console.warn('Failed to load tasks from server:', e);
+    console.error('Failed to load tasks from server:', e);
+    throw new Error('Failed to load tasks from server');
   }
 
   return result;
 }
+
+// ============================================================================
+// MUTATIONS — Server is authoritative; optimistic updates with rollback
+// ============================================================================
 
 export async function createCustomerOnServer(newCust: CustomerRecord): Promise<CustomerRecord> {
   const payload = {
@@ -273,4 +288,37 @@ export async function toggleTaskOnServer(taskId: string, currentStatus: string):
     const res = await apiClient.completeTask(taskId);
     return mapServerTask(res.data);
   }
+}
+
+export async function updateCustomerOnServer(customerId: string, updates: Partial<CustomerRecord>): Promise<CustomerRecord> {
+  const payload = {
+    name: updates.name,
+    companyName: updates.companyName,
+    kraPin: updates.kraPin,
+    email: updates.email,
+    phone: updates.phone,
+    billingAddress: updates.billingAddress,
+    creditLimit: updates.creditLimitKes,
+    paymentTermsDays: updates.paymentTermsDays,
+    lifecycle: updates.lifecycle,
+    type: updates.businessType,
+    leadSource: updates.leadSource,
+  };
+
+  const res = await apiClient.updateCustomer(customerId, payload);
+  return mapServerCustomer(res.data);
+}
+
+export async function archiveCustomerOnServer(customerId: string): Promise<void> {
+  await apiClient.archiveCustomer(customerId);
+}
+
+export async function createContactOnServer(contact: CustomerContact): Promise<CustomerContact> {
+  const res = await apiClient.createContact(contact.customerId, contact);
+  return res.data;
+}
+
+export async function updateContactOnServer(contactId: string, updates: Partial<CustomerContact>): Promise<CustomerContact> {
+  const res = await apiClient.updateContact(contactId, updates);
+  return res.data;
 }

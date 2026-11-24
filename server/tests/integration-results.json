@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-19T08:06:18.156Z",
+  "generatedAt": "2026-11-24T13:32:10.489Z",
   "total": 33,
   "passed": 33,
   "failed": 0,
@@ -94,7 +94,7 @@
       "id": 13,
       "suite": "TENANT",
       "expected": "Client-supplied organizationId must be ignored on create (record belongs to caller org)",
-      "actual": "HTTP 201; record org=5d75b71c-8d95-484c-81df-1e4c1357b11d",
+      "actual": "HTTP 201; record org=1a1f9dd2-e4a1-4f41-b130-630f26a573ea",
       "pass": true
     },
     {
@@ -122,7 +122,7 @@
       "id": 17,
       "suite": "ACCOUNTING",
       "expected": "Invoice created (201)",
-      "actual": "HTTP 201; id=e642499a-b482-44b4-9c30-d8156b446e77; status=DRAFT",
+      "actual": "HTTP 201; id=bc3b6516-e40a-4307-ac07-64d142ec0090; status=DRAFT",
       "pass": true
     },
     {
@@ -235,7 +235,7 @@
       "id": 33,
       "suite": "ETIMS",
       "expected": "Worker against unreachable KRA never marks queue items ACCEPTED",
-      "actual": "pendingBefore=72; after statuses=PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING,PENDING",
+      "actual": "pendingBefore=2; after statuses=PENDING,PENDING",
       "pass": true
     }
   ]

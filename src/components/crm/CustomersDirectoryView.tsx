@@ -39,6 +39,8 @@ interface CustomersDirectoryViewProps {
   salesReps: SalesRepRecord[];
   onCreateCustomer: (customer: CustomerRecord) => void;
   onAddContact: (contact: CustomerContact) => void;
+  onUpdateCustomer?: (customerId: string, updates: Partial<CustomerRecord>) => void;
+  onArchiveCustomer?: (customerId: string) => void;
   onCreateDeal: (deal: DealRecord) => void;
   onCreateTask: (task: TaskRecord) => void;
   selectedCustomer?: CustomerRecord | null;

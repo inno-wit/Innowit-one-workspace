@@ -55,7 +55,6 @@ import {
 } from '@/modules/automation/store';
 import { KRA_ENDPOINTS, saveAirGapStatus } from '@/modules/etims/airgap';
 import { saveErpState } from '@/modules/erp/store';
-import { saveCrmState } from '@/modules/crm/store';
 import { saveCollaborationState } from '@/modules/collaboration/store';
 import { saveAuditLogs } from '@/modules/audit/store';
 import {
@@ -155,14 +154,8 @@ export function resetWorkspaceDemoData(): SeedManifest {
     projects: SEED_ERP_PROJECTS,
   });
 
-  saveCrmState({
-    customers: SEED_CUSTOMERS,
-    contacts: SEED_CONTACTS,
-    deals: SEED_DEALS,
-    tasks: SEED_TASKS,
-    salesReps: SEED_SALES_REPS,
-    activityLogs: SEED_ACTIVITY_LOGS,
-  });
+  // CRM business data is now server-authoritative; no localStorage persistence
+  // Seed data is used as initial in-memory state only
 
   saveCollaborationState({
     channels: SEED_CHANNELS,

@@ -147,6 +147,13 @@ enum EtimsSubmissionStatus {
   CANCELLED
 }
 
+enum ImportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum TaxClassification {
   STANDARD_16 // 16% VAT Kenya
   ZERO_RATED   // 0%
@@ -204,6 +211,7 @@ model Organization {
   customFieldValues         CustomFieldValue[]
   savedViews                SavedView[]
   automationRules           AutomationRule[]
+  importJobs                ImportJob[]
 }
 
 model Branch {
@@ -267,6 +275,7 @@ model User {
   commissionRecords         CommissionRecord[]
   approvedCommissions       CommissionRecord[] @relation("CommissionApprovedBy")
   savedViews                SavedView[]
+  importJobs                ImportJob[]        @relation("ImportJobCreatedBy")
 
   @@index([organizationId])
   @@index([branchId])
@@ -1030,6 +1039,37 @@ model AutomationExecutionLog {
 
   @@index([ruleId])
   @@index([executedAt])
+}
+
+model ImportJob {
+  id                  String      @id @default(uuid())
+  organizationId      String
+  entityType          String      // "CUSTOMER" | "CONTACT" | "DEAL" | "TASK" | "ACTIVITY"
+  fileUrl             String
+  mappingJson         String      @db.Text
+  status              ImportJobStatus @default(PENDING)
+  optionsJson         String?     @db.Text
+  idempotencyKey      String?     @unique
+  processedCount      Int         @default(0)
+  succeededCount      Int         @default(0)
+  failedCount         Int         @default(0)
+  skippedCount        Int         @default(0)
+  errorJson           String?     @db.Text
+  createdById         String
+  startedAt           DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy           User        @relation("ImportJobCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId])
+  @@index([status])
+  @@index([entityType])
+  @@index([createdById])
+  @@index([createdAt])
 }
 
 // ============================================================================

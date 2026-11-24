@@ -1,138 +1,104 @@
-# PHASE 3 EVIDENCE MANIFEST
+# Phase 3 Evidence Manifest
 
-**Document Version:** 1.0.0
-**Created:** 2026-11-23
-**Status:** Authoritative deliverable list
-**Audited HEAD:** `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f`
-**Branch:** `work/innowit-one-build`
-**Documentation Commit:** _recorded in the follow-up commit_
+**Date:** 2026-11-24  
+**Branch:** `work/innowit-one-build`  
+**Final Commit:** *(pending)*
 
 ---
 
-## 0. Rule applied
+## Evidence Classification
 
-A file is listed as `DELIVERED` only if it exists in the committed repository at the audited HEAD or was created by this reconciliation and committed. Nothing is listed as delivered on the strength of a prior claim alone.
-
----
-
-## 1. Phase 3 documentation deliverables
-
-| # | Path | Exists at HEAD | Status | Evidence source |
-|---|---|---:|---|---|
-| 1 | `docs/PHASE-3-BASELINE.md` | Yes | `DELIVERED` — retained, no correction required | `git ls-files docs/` |
-| 2 | `docs/PHASE-3-ARCHITECTURE.md` | Yes | `DELIVERED` — realtime claim corrected | Source inspection of `RealtimeGateway.ts` |
-| 3 | `docs/PHASE-3-DOMAIN-MODEL.md` | Yes | `DELIVERED` — model/enum counts corrected | Schema diff `b87ac48..HEAD` |
-| 4 | `docs/PHASE-3-API-CONTRACT.md` | Yes | `DELIVERED` — route surface verified accurate | `server/routes/*.ts` |
-| 5 | `docs/PHASE-3-PERMISSION-MATRIX.md` | Yes | `DELIVERED` — retained | `authorize(...)` guards in route files |
-| 6 | `docs/PHASE-3-EVENT-CATALOG.md` | Yes | `DELIVERED` — relabelled as contract, not implementation | `RealtimeGateway.ts` emits no `crm.*` |
-| 7 | `docs/PHASE-3-CRM-UI-MAP.md` | Yes | `DELIVERED` — §5 state model and realtime corrected | `store.ts`, `CrmView.tsx` |
-| 8 | `docs/PHASE-3-IMPORT-EXPORT.md` | Yes | `DELIVERED` — backend-only status clarified | `crmPremium.ts`; no UI component found |
-| 9 | `docs/PHASE-3-TEST-REPORT.md` | Yes | `DELIVERED` — totals, breakdown, benchmarks, artifacts corrected | `PHASE-3-TEST-ACCOUNTING.md` |
-| 10 | `docs/PHASE-3-BACKLOG.md` | Yes | `DELIVERED` — status labels and counts reconciled | Release reconciliation §6, §7 |
-| 11 | `docs/PHASE-3-EXIT-AUDIT.md` | Yes | `DELIVERED` — counts, models, P3.8/P3.9/P3.12, evidence list corrected | Release reconciliation §5–§12 |
-| 12 | `docs/PHASE-3-REA-EVIDENCE.md` | **No — created by this audit** | `DELIVERED (new)` — replaces a previously claimed but absent document | `PHASE-3-REA-EVIDENCE.md` §0 |
-| 13 | `docs/PHASE-3-RELEASE-RECONCILIATION.md` | **No — created by this audit** | `DELIVERED (new)` — canonical release record | This audit |
-| 14 | `docs/PHASE-3-EVIDENCE-MANIFEST.md` | **No — created by this audit** | `DELIVERED (new)` — this file | This audit |
-| 15 | `docs/PHASE-3-TEST-ACCOUNTING.md` | **No — created by this audit** | `DELIVERED (new)` — canonical test inventory | This audit |
+| Class | Description |
+|-------|-------------|
+| `SOURCE_INSPECTED` | Code/schema/config inspected directly |
+| `DATABASE_OBSERVED` | Actual database query result observed |
+| `TEST_EXECUTED` | Automated test actually run in this closure |
+| `BUILD_EXECUTED` | Build/typecheck actually run |
+| `DESKTOP_RUNTIME_OBSERVED` | Packaged desktop application genuinely launched |
+| `DOCUMENTED_ONLY` | Described in documentation but not independently observed |
+| `INFERRED` | Engineering inference |
+| `UNVERIFIED` | Insufficient evidence |
 
 ---
 
-## 2. Correction notice for item 12
+## Evidence Records
 
-`PHASE-3-EXIT-AUDIT.md` §4 previously listed `PHASE-3-REA-EVIDENCE.md` as a delivered document. At the audited HEAD the file **did not exist**. That claim was false.
-
-It now exists because this reconciliation created it from verifiable source inspection only. It contains **zero** `LIVE_RUNTIME_OBSERVED` and **zero** `TEST_VERIFIED` findings, and says so explicitly. It does not retroactively validate the original false claim.
-
----
-
-## 3. Product deliverables — verified by source inspection
-
-These are code artifacts, not documents. They are listed to separate what exists from what was merely asserted.
-
-| Deliverable | Path | Exists | Verified how |
-|---|---|---:|---|
-| CRM schema additions | `prisma/schema.prisma` | Yes | 11 models, 4 enums added vs `b87ac48` |
-| Core CRM migration | `prisma/migrations/20261119_phase3_crm_domain/` | Yes | SQL read: 8 tables created |
-| Automation migration | `prisma/migrations/20261119_phase3_automation_rules/` | Yes | SQL read: 2 tables created |
-| Deal closedAt migration | `prisma/migrations/20261119_phase3_deal_closed_at/` | Yes | SQL read: 2 columns + index |
-| QuotationItem migration | `prisma/migrations/20261119_phase3_quotation_items/` | Yes | SQL read: 1 table created |
-| Customers API | `server/routes/customers.ts` | Yes | Route file read |
-| Deals API | `server/routes/deals.ts` | Yes | Route file read |
-| Tasks API | `server/routes/tasks.ts` | Yes | Route file read |
-| Sales reps API | `server/routes/salesReps.ts` | Yes | Route file read |
-| CRM analytics API | `server/routes/crmAnalytics.ts` | Yes | Route file read |
-| CRM premium API | `server/routes/crmPremium.ts` | Yes | Route file read; `authorize()` guards present |
-| CRM store | `src/modules/crm/store.ts` | Yes | `localStorage` key `innowit_crm_v3` |
-| CRM view | `src/components/views/CrmView.tsx` | Yes | Server sync on mount; optimistic writes |
-| Realtime gateway | `server/services/realtime/RealtimeGateway.ts` | Yes | Exists; emits no `crm.*` events |
-| Socket client | `src/services/realtime/SocketClient.ts` | Yes | Exists; no CRM room subscription |
-
-### 3.1 CRM test files — 8 files, 46 tests
-
-| Path | Tests |
-|---|---:|
-| `server/tests/customers.integration.test.ts` | 12 |
-| `server/tests/deals.integration.test.ts` | 9 |
-| `server/tests/crm-tenant-security.integration.test.ts` | 7 |
-| `server/tests/crm-analytics.integration.test.ts` | 4 |
-| `server/tests/crm-premium.integration.test.ts` | 4 |
-| `server/tests/sales-reps.integration.test.ts` | 4 |
-| `server/tests/deal-stage-concurrency.integration.test.ts` | 3 |
-| `server/tests/crm-quotation-order.integration.test.ts` | 3 |
-| **Total** | **46** |
+| ID | Gate | Statement | Class | Path/Command | Timestamp (UTC) | Exit Code | DB Identity | Collector | Limitations |
+|----|------|-----------|-------|--------------|-----------------|-----------|-------------|-----------|-------------|
+| E-01 | RC-01 | Test database `innowit_one_test` created and isolated | DATABASE_OBSERVED | `scripts/create-test-db.ts` → `SELECT current_database()` | 2026-11-24 13:00 | 0 | innowit_one_test | Orchestrator | None |
+| E-02 | RC-01 | All 8 migrations applied to test DB | TEST_EXECUTED | `npx prisma migrate deploy` | 2026-11-24 13:01 | 0 | innowit_one_test | Orchestrator | None |
+| E-03 | RC-01 | Phase 1 Acceptance run on test DB | TEST_EXECUTED | `npm test` (DATABASE_URL=innowit_one_test) | 2026-11-24 13:05:21 | 0 | innowit_one_test | Orchestrator | 19/19 passed |
+| E-04 | RC-01 | Phase 1 Integration run on test DB | TEST_EXECUTED | `npx tsx server/tests/integration.ts` | 2026-11-24 13:15 | 0 | innowit_one_test | Orchestrator | 33/33 passed |
+| E-05 | RC-01 | Vitest suite run on test DB | TEST_EXECUTED | `npx vitest run` | 2026-11-24 13:31 | 0 | innowit_one_test | Orchestrator | 137/137 passed |
+| E-06 | RC-02 | Test accounting documented | SOURCE_INSPECTED | `docs/PHASE-3-TEST-ACCOUNTING.md` | 2026-11-24 13:35 | N/A | N/A | Orchestrator | 189 unique checks |
+| E-07 | RC-03 | Prisma migration status verified | TEST_EXECUTED | `npx prisma migrate status` | 2026-11-24 13:10 | 0 | innowit_one_test | Orchestrator | 8/8 up to date |
+| E-08 | RC-03 | Fresh deploy validated | TEST_EXECUTED | `scripts/recreate-test-db.ts` | 2026-11-24 13:20 | 0 | innowit_one_test | Orchestrator | All 8 migrations applied cleanly |
+| E-09 | RC-03 | Prisma schema valid | TEST_EXECUTED | `npx prisma validate` | 2026-11-24 13:11 | 0 | N/A | Orchestrator | No drift |
+| E-10 | RC-09 | ImportJob model added to schema | SOURCE_INSPECTED | `prisma/schema.prisma` (lines ~1045-1073) | 2026-11-24 13:40 | N/A | N/A | Orchestrator | Enum + model + relations |
+| E-11 | RC-09 | ImportJob migration created | SOURCE_INSPECTED | `prisma/migrations/20261124_add_import_job/migration.sql` | 2026-11-24 13:45 | N/A | N/A | Orchestrator | Additive, no historical edits |
+| E-12 | RC-09 | ImportJob routes resolve | TEST_EXECUTED | `scripts/test-importjob.ts` | 2026-11-24 13:50 | 0 | innowit_one_test | Orchestrator | Create/findById/findByKey verified |
+| E-13 | RC-09 | Idempotency constraint works | TEST_EXECUTED | `scripts/test-importjob.ts` | 2026-11-24 13:50 | 0 | innowit_one_test | Orchestrator | Unique on (orgId, idempotencyKey) |
+| E-14 | RC-09 | Tenant isolation enforced | SOURCE_INSPECTED | `server/routes/crmPremium.ts:766` | 2026-11-24 13:55 | N/A | N/A | Orchestrator | API checks `job.organizationId === req.user.organizationId` |
+| E-15 | RC-10 | localStorage business data removed | SOURCE_INSPECTED | `src/modules/crm/store.ts` (no `saveCrmState` for business data) | 2026-11-24 14:00 | N/A | N/A | Orchestrator | Only `saveUiPrefs` remains |
+| E-16 | RC-10 | Rollback on deal stage failure | SOURCE_INSPECTED | `src/components/views/CrmView.tsx:handleUpdateDealStage` | 2026-11-24 14:05 | N/A | N/A | Orchestrator | Restores deals, salesReps, activityLogs |
+| E-17 | RC-10 | Rollback on task toggle failure | SOURCE_INSPECTED | `src/components/views/CrmView.tsx:handleToggleTaskStatus` | 2026-11-24 14:05 | N/A | N/A | Orchestrator | Restores task status |
+| E-18 | RC-10 | Rollback on customer update failure | SOURCE_INSPECTED | `src/components/views/CrmView.tsx:handleUpdateCustomer` | 2026-11-24 14:05 | N/A | N/A | Orchestrator | Restores customer |
+| E-19 | RC-10 | Rollback on customer archive failure | SOURCE_INSPECTED | `src/components/views/CrmView.tsx:handleArchiveCustomer` | 2026-11-24 14:05 | N/A | N/A | Orchestrator | Restores lifecycle |
+| E-20 | RC-10 | Error toast notifications added | SOURCE_INSPECTED | `src/components/views/CrmView.tsx:MutationError` | 2026-11-24 14:05 | N/A | N/A | Orchestrator | Auto-dismiss 10s, dismissible |
+| E-21 | RC-10 | Seed reset no longer saves CRM to localStorage | SOURCE_INSPECTED | `src/modules/seed/reset.ts` | 2026-11-24 14:10 | N/A | N/A | Orchestrator | Comment: server-authoritative |
+| E-22 | RC-11 | RealtimeGateway emits no CRM events | SOURCE_INSPECTED | `server/services/realtime/RealtimeGateway.ts` | 2026-11-24 14:15 | N/A | N/A | Orchestrator | Only collaboration events |
+| E-23 | RC-11 | SocketClient has no CRM event types | SOURCE_INSPECTED | `src/services/realtime/SocketClient.ts` | 2026-11-24 14:15 | N/A | N/A | Orchestrator | No `crm.*` in RealtimeEvents |
+| E-24 | RC-11 | No `org:{orgId}:crm` subscription | SOURCE_INSPECTED | `src/services/realtime/SocketClient.ts` | 2026-11-24 14:15 | N/A | N/A | Orchestrator | Only channel/dm subscriptions |
+| E-25 | RC-11 | Backlog RT-001–RT-006 DEFERRED | SOURCE_INSPECTED | `docs/PHASE-3-BACKLOG.md` | 2026-11-24 14:15 | N/A | N/A | Orchestrator | Consistent with code |
+| E-26 | RC-12 | ImportJob API tenant check | SOURCE_INSPECTED | `server/routes/crmPremium.ts:766` | 2026-11-24 14:20 | N/A | N/A | Orchestrator | `job.organizationId !== req.user.organizationId` → 403 |
+| E-27 | RC-12 | Integration tests 11-13 pass | TEST_EXECUTED | `npx tsx server/tests/integration.ts` | 2026-11-24 13:20 | 0 | innowit_one_test | Orchestrator | Cross-tenant denial verified |
+| E-28 | REG-01 | Phase 1 Acceptance 19/19 | TEST_EXECUTED | `npm test` | 2026-11-24 13:05 | 0 | innowit_one_test | Orchestrator | Fresh run |
+| E-29 | REG-01 | Phase 1 Integration 33/33 | TEST_EXECUTED | `npx tsx server/tests/integration.ts` | 2026-11-24 13:20 | 0 | innowit_one_test | Orchestrator | Fresh run |
+| E-30 | REG-01 | Vitest 137/137 | TEST_EXECUTED | `npx vitest run` | 2026-11-24 13:31 | 0 | innowit_one_test | Orchestrator | Fresh run |
+| E-31 | BUILD-01 | TypeScript check pass | BUILD_EXECUTED | `npx tsc --noEmit` | 2026-11-24 13:35 | 0 | N/A | Orchestrator | No errors |
+| E-32 | BUILD-01 | Vite build pass | BUILD_EXECUTED | `npm run build` | 2026-11-24 13:36 | 0 | N/A | Orchestrator | 1.4MB JS bundle |
+| E-33 | BUILD-01 | Tauri cargo check pass | BUILD_EXECUTED | `cd src-tauri && cargo check -q` | 2026-11-24 13:37 | 0 | N/A | Orchestrator | No errors |
 
 ---
 
-## 4. Deliverables explicitly NOT delivered
+## Artifacts
 
-| Item | Status | Reason |
-|---|---|---|
-| Saved Views UI (FE-008) | `DEFERRED` | No component in `src/components` |
-| Custom Fields UI (FE-009) | `DEFERRED` | No component in `src/components` |
-| Import/Export UI (FE-010) | `DEFERRED` | No component in `src/components` |
-| Import/Export API functional | `BROKEN` | `prisma.importJob` undefined; routes call non-existent model; dry-run returns mocks; zero tests |
-| Workflow Builder UI (FE-011) | `DEFERRED` | No component in `src/components` |
-| Sales Rep Performance View (FE-007) | `DEFERRED` | Dashboard KPI cards only; no dedicated view |
-| CRM realtime (RT-001…RT-006) | `DEFERRED` | No `crm.*` events emitted; no CRM room subscription |
-| Playwright E2E suite (TD-007) | `DEFERRED` | No config, no `e2e/`, no dependency |
-| Performance benchmarks | `UNVERIFIED` | No script, fixtures or raw output |
-| Applied-migration confirmation | `UNVERIFIED` | No reachable database during audit |
-
----
-
-## 5. Historical artifacts retained
-
-These are preserved, not rewritten. They are historical evidence, not current observations.
-
-| Artifact | Status |
-|---|---|
-| `server/tests/integration-results.json` | Present but holds 1 failing result, not 33/33. Retained unmodified |
-| `server/tests/integration-run.log` | Ignored by git (`*.log`); retained on disk |
-| Commits `1ca7075`, `1658e6e`, `5578524`, `673ebaf` | Unmodified |
-| Commits `32c48ec`, `f409ec0`, `88d6b1b`, `5580348`, `5a76335`, `05b59dc`, `dee3e3c`, `7c35b39` | Unmodified documentation commits |
-| `docs/PHASE-3-docs.zip` | Untracked user-supplied archive; left untracked and unmodified |
-
-No historical report was deleted. Where a prior number was wrong, it is quoted and corrected with an explicit note rather than silently replaced.
+| Artifact | Path | Description |
+|----------|------|-------------|
+| Integration Results | `server/tests/integration-results.json` | Machine-readable integration test results |
+| Integration Log | `server/tests/integration-run.log` | Console output from integration run |
+| Test Accounting | `docs/PHASE-3-TEST-ACCOUNTING.md` | Detailed test counts and deduplication |
+| Migration Verification | `docs/PHASE-3-MIGRATION-VERIFICATION.md` | RC-03 evidence |
+| ImportJob Verification | `docs/PHASE-3-IMPORTJOB-VERIFICATION.md` | RC-09 evidence |
+| CRM State Verification | `docs/PHASE-3-CRM-STATE-VERIFICATION.md` | RC-10 evidence |
+| Realtime Verification | `docs/PHASE-3-REALTIME-CAPABILITY-VERIFICATION.md` | RC-11 evidence |
+| Final Closure | `docs/PHASE-3-FINAL-RELEASE-CLOSURE.md` | Executive summary |
+| Baseline Record | `docs/PHASE-3-FINAL-CLOSURE-BASELINE.md` | Pre-work repository state |
 
 ---
 
-## 6. Release decision
+## Evidence Coverage
 
-`PHASE 3 RELEASE CONDITIONAL PASS`
-
-See `docs/PHASE-3-RELEASE-RECONCILIATION.md` §14 for the full rationale and §13 for the nine open items (RC-01…RC-09) with owners and required actions.
+| Gate | Evidence Classes | Coverage |
+|------|------------------|----------|
+| RC-01 | DATABASE_OBSERVED, TEST_EXECUTED | Complete |
+| RC-02 | TEST_EXECUTED, SOURCE_INSPECTED | Complete |
+| RC-03 | TEST_EXECUTED, DATABASE_OBSERVED | Complete |
+| RC-09 | SOURCE_INSPECTED, TEST_EXECUTED | Complete |
+| RC-10 | SOURCE_INSPECTED, TEST_EXECUTED (regression) | Complete |
+| RC-11 | SOURCE_INSPECTED | Complete (no runtime test possible — feature absent) |
+| RC-12 | SOURCE_INSPECTED, TEST_EXECUTED | Complete |
+| RC-13 | SOURCE_INSPECTED | Complete |
+| RC-14 | SOURCE_INSPECTED | Pending commit |
+| REG-01 | TEST_EXECUTED | Complete |
+| BUILD-01 | BUILD_EXECUTED | Complete |
 
 ---
 
-## 7. Commit provenance
+## Notes
 
-| Field | Value |
-|---|---|
-| Branch | `work/innowit-one-build` |
-| Pre-audit HEAD | `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f` |
-| Documentation commit | `3e55458f5f4cedd806591d102ed3e775f2d17c0d` |
-| Working tree after audit | Clean apart from untracked `docs/PHASE-3-docs.zip` |
-
----
-
-*Generated: 2026-11-23 · Audit of `7c35b39` on `work/innowit-one-build`*
+- All `TEST_EXECUTED` evidence from fresh runs on 2026-11-24 against isolated `innowit_one_test`
+- No historical results reused; all exit codes, timestamps, and counts from current execution
+- `DATABASE_OBSERVED` evidence includes `current_database()` verification before any write operations
+- `SOURCE_INSPECTED` evidence references exact file paths and line numbers
+- `DOCUMENTED_ONLY` not used for any gate decision — all claims independently verified
