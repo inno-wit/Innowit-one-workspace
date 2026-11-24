@@ -364,7 +364,11 @@ None of these are product-code defects requiring implementation in this task. Al
 
 ## 15. Documentation commit
 
-The commit containing this reconciliation and the corrected documents is recorded in the follow-up documentation commit and in `docs/PHASE-3-EVIDENCE-MANIFEST.md`. It is not written here in advance, because a SHA cannot be known before the commit exists.
+The commit containing this reconciliation and the corrected documents is:
+
+`3e55458f5f4cedd806591d102ed3e775f2d17c0d` — `docs(phase3): reconcile CRM release evidence and acceptance status`
+
+This SHA is recorded here post-commit, as required by the audit protocol (no anticipated SHA written before the commit exists).
 
 ---
 

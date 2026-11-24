@@ -130,7 +130,7 @@ See `docs/PHASE-3-RELEASE-RECONCILIATION.md` §14 for the full rationale and §1
 |---|---|
 | Branch | `work/innowit-one-build` |
 | Pre-audit HEAD | `7c35b39aadcf79e79548059ece46f6e5bbbc7d1f` |
-| Documentation commit | _recorded in the follow-up commit_ |
+| Documentation commit | `3e55458f5f4cedd806591d102ed3e775f2d17c0d` |
 | Working tree after audit | Clean apart from untracked `docs/PHASE-3-docs.zip` |
 
 ---
