@@ -212,6 +212,28 @@ model Organization {
   savedViews                SavedView[]
   automationRules           AutomationRule[]
   importJobs                ImportJob[]
+
+  // ---- Phase 4 accounting & financial engine ----
+  accountingProfile         OrganizationAccountingProfile?
+  fiscalYears               FiscalYear[]
+  accountingPeriods         AccountingPeriod[]
+  costCentres               CostCentre[]
+  exchangeRates             ExchangeRate[]
+  taxCodes                  TaxCode[]
+  taxTransactions           TaxTransaction[]
+  supplierBills             SupplierBill[]
+  supplierPayments          SupplierPayment[]
+  paymentAllocations        PaymentAllocation[]
+  supplierPaymentAllocations SupplierPaymentAllocation[]
+  bankAccounts              BankAccount[]
+  bankStatements            BankStatement[]
+  bankReconciliations       BankReconciliation[]
+  bankMatches               BankMatch[]
+  budgets                   Budget[]
+  budgetLines               BudgetLine[]
+  mpesaTransactions         MpesaTransaction[]
+  domainEvents              DomainEventLog[]
+  documentSequences         DocumentSequence[]
 }
 
 model Branch {
@@ -232,6 +254,7 @@ model Branch {
   purchaseOrders   PurchaseOrder[]
   channels         Channel[]
   customers        Customer[]
+  journalEntries   JournalEntry[]
 
   @@unique([organizationId, branchCode])
 }
@@ -1086,11 +1109,29 @@ model Account {
   isActive         Boolean        @default(true)
   currentBalance   Decimal        @default(0.00) @db.Decimal(14, 2)
 
+  // ---- Phase 4: hierarchy, classification and posting rules ----
+  parentId         String?
+  description      String?
+  subtype          String?                             // e.g. "CURRENT_ASSET", "COST_OF_SALES"
+  normalBalance    AccountNormalBalance @default(DEBIT)
+  isPostable       Boolean        @default(true)       // summary/header accounts are false
+  isControl        Boolean        @default(false)      // control accounts cannot be posted to directly
+  controlType      AccountControlType @default(NONE)
+  isSystem         Boolean        @default(false)      // seeded control accounts cannot be deleted
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parent           Account?       @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children         Account[]      @relation("AccountHierarchy")
   journalLines     JournalLine[]
+  bankAccounts     BankAccount[]
+  budgetLines      BudgetLine[]
 
   @@unique([organizationId, accountNumber])
   @@index([organizationId])
+  @@index([parentId])
+  @@index([organizationId, controlType])
 }
 
 model JournalEntry {
@@ -1105,12 +1146,37 @@ model JournalEntry {
   reversalEntryId  String?        @unique
   createdAt        DateTime       @default(now())
 
+  // ---- Phase 4: lifecycle, period locking, dimensions, FX, idempotency ----
+  status           JournalStatus  @default(POSTED) // legacy rows are already in the ledger
+  branchId         String?
+  periodId         String?
+  currency         CurrencyCode   @default(KES)
+  exchangeRate     Decimal        @default(1.00000000) @db.Decimal(18, 8)
+  sourceKey        String?        // idempotency key supplied by the source module
+  transactionRef   String?        // external document reference
+  postedAt         DateTime?
+  postedBy         String?
+  approvedAt       DateTime?
+  approvedBy       String?
+  createdBy        String?
+  reversalReason   String?
+  updatedAt        DateTime       @updatedAt
+
   lines            JournalLine[]
+  period           AccountingPeriod? @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  branch           Branch?        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  reversalEntry    JournalEntry?  @relation("JournalReversal", fields: [reversalEntryId], references: [id], onDelete: Restrict)
+  reversedEntry    JournalEntry?  @relation("JournalReversal")
 
   @@unique([organizationId, entryNumber]) // audit fix SC-6: tenant-scoped
+  @@unique([organizationId, sourceKey])
   @@index([postingDate])
   @@index([sourceModule, sourceId])
   @@index([organizationId])
+  @@index([organizationId, postingDate])
+  @@index([periodId])
+  @@index([status])
+  @@index([branchId])
 }
 
 model JournalLine {
@@ -1121,11 +1187,21 @@ model JournalLine {
   debit            Decimal        @default(0.00) @db.Decimal(14, 2)
   credit           Decimal        @default(0.00) @db.Decimal(14, 2)
 
+  // ---- Phase 4: transaction currency, functional-currency amounts, dimensions ----
+  currency         CurrencyCode   @default(KES)
+  fxRate           Decimal        @default(1.00000000) @db.Decimal(18, 8)
+  baseDebit        Decimal        @default(0.00) @db.Decimal(14, 2)
+  baseCredit       Decimal        @default(0.00) @db.Decimal(14, 2)
+  costCentreId     String?
+  dimensionTag     String?
+
   journalEntry     JournalEntry   @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
   account          Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  costCentre       CostCentre?    @relation(fields: [costCentreId], references: [id], onDelete: Restrict)
 
   @@index([accountId])
   @@index([journalEntryId])
+  @@index([costCentreId])
 }
 
 // ============================================================================
@@ -1297,6 +1373,13 @@ model SalesInvoice {
   paidAmount       Decimal        @default(0.00) @db.Decimal(14, 2)
   createdAt        DateTime       @default(now())
 
+  // ---- Phase 4: posting provenance, FX snapshot, tax snapshot ----
+  currency         CurrencyCode   @default(KES)
+  exchangeRate     Decimal        @default(1.00000000) @db.Decimal(18, 8)
+  postedJournalId  String?
+  journalPostedAt  DateTime?
+  taxSnapshotJson  String?        @db.Text
+
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   branch           Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
   customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
@@ -1306,12 +1389,15 @@ model SalesInvoice {
   creditNotes      CreditNote[]
   etimsInvoice     EtimsInvoice?
   transmissionJobs EtimsTransmissionQueue[]
+  allocations      PaymentAllocation[]
 
   @@unique([organizationId, invoiceNumber]) // audit fix SC-6: tenant-scoped
   @@index([status])
   @@index([invoiceDate])
   @@index([branchId])
   @@index([customerId])
+  @@index([postedJournalId])
+  @@index([organizationId, customerId, status])
 }
 
 model SalesInvoiceItem {
@@ -1335,7 +1421,7 @@ model SalesInvoiceItem {
 model CustomerPayment {
   id               String         @id @default(uuid())
   organizationId   String         // audit fix SC-23: direct tenant scoping
-  salesInvoiceId   String
+  salesInvoiceId   String?        // Phase 4: nullable to allow unapplied cash / on-account receipts
   paymentNumber    String
   paymentDate      DateTime
   amount           Decimal        @db.Decimal(14, 2)
@@ -1343,12 +1429,28 @@ model CustomerPayment {
   referenceCode    String         // e.g. M-Pesa receipt code "QG721HD89"
   createdAt        DateTime       @default(now())
 
+  // ---- Phase 4: unapplied cash, allocation status, FX, provenance ----
+  customerId       String?
+  branchId         String?
+  currency         CurrencyCode   @default(KES)
+  exchangeRate     Decimal        @default(1.00000000) @db.Decimal(18, 8)
+  unappliedAmount  Decimal        @default(0.00) @db.Decimal(14, 2)
+  status           PaymentStatus  @default(POSTED)
+  providerRef      String?        // M-Pesa receipt / bank transaction reference
+  bankAccountId    String?
+  postedJournalId  String?
+  postedAt         DateTime?
+  createdBy        String?
+
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  salesInvoice     SalesInvoice?  @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+  allocations      PaymentAllocation[]
 
   @@unique([organizationId, paymentNumber]) // audit fix SC-6: tenant-scoped
+  @@unique([organizationId, providerRef])
   @@index([salesInvoiceId])
   @@index([paymentDate])
+  @@index([organizationId, customerId, paymentDate])
 }
 
 model CreditNote {
@@ -1360,6 +1462,17 @@ model CreditNote {
   totalAmount      Decimal        @db.Decimal(14, 2)
   taxAmount        Decimal        @db.Decimal(14, 2)
   issuedAt         DateTime       @default(now())
+
+  // ---- Phase 4: lifecycle, posting provenance, FX ------------------------------
+  status           CreditNoteStatus @default(DRAFT)
+  branchId         String?
+  customerPaymentId String?
+  currency         CurrencyCode   @default(KES)
+  exchangeRate     Decimal        @default(1.00000000) @db.Decimal(18, 8)
+  subtotal         Decimal        @default(0.00) @db.Decimal(14, 2)
+  postedJournalId  String?
+  postedAt         DateTime?
+  createdBy        String?
 
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   salesInvoice     SalesInvoice   @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
@@ -1439,6 +1552,8 @@ model Supplier {
 
   organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   purchaseOrders   PurchaseOrder[]
+  bills            SupplierBill[]
+  payments         SupplierPayment[]
 
   @@index([organizationId])
 }
@@ -1554,9 +1669,752 @@ model AuditLog {
   ipAddress        String?
   timestamp        DateTime       @default(now())
 
+  // ---- Phase 4: tenant-scoped audit queries (no join required) ----
+  organizationId   String?
+  branchId         String?
+  correlationId    String?
+
   user             User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([entityType, entityId])
   @@index([timestamp])
   @@index([userId])
+  @@index([organizationId, timestamp])
+  @@index([correlationId])
+}
+
+// ============================================================================
+// PHASE 4 — ACCOUNTING & FINANCIAL ENGINE
+// Additive only. No existing table is dropped or renamed.
+// ============================================================================
+
+enum JournalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  REVERSED
+  VOID
+}
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+}
+
+enum PeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  CLOSED
+}
+
+enum AccountNormalBalance {
+  DEBIT
+  CREDIT
+}
+
+enum AccountControlType {
+  NONE
+  CUSTOMER_AR
+  SUPPLIER_AP
+  BANK
+  CASH
+  MPESA
+  VAT_OUTPUT
+  VAT_INPUT
+  WHT_PAYABLE
+  INVENTORY
+  PAYROLL
+  RETAINED_EARNINGS
+  FX_GAIN_LOSS
+  SUSPENSE
+}
+
+enum TaxKind {
+  VAT_STANDARD
+  VAT_ZERO
+  VAT_EXEMPT
+  VAT_REVERSE_CHARGE
+  WHT_INCOME
+  WHT_VAT
+  NONE
+}
+
+enum TaxApplicability {
+  SALES
+  PURCHASE
+  BOTH
+}
+
+enum PaymentStatus {
+  DRAFT
+  POSTED
+  PARTIALLY_ALLOCATED
+  FULLY_ALLOCATED
+  REVERSED
+}
+
+enum CreditNoteStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  APPLIED
+  CANCELLED
+}
+
+enum SupplierBillStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  POSTED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum BankAccountType {
+  BANK
+  CASH
+  MPESA
+}
+
+enum StatementLineStatus {
+  UNMATCHED
+  MATCHED
+  EXCLUDED
+}
+
+enum ReconciliationStatus {
+  DRAFT
+  FINALIZED
+  REVERSED
+}
+
+enum ReconciliationMatchType {
+  AUTO_EXACT
+  AUTO_PARTIAL
+  MANUAL
+  MULTI_LINE
+  BANK_FEE
+}
+
+enum ExchangeRateSource {
+  CBK
+  MANUAL
+  CONTRACTUAL
+  PROVIDER
+}
+
+enum BudgetStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  ARCHIVED
+}
+
+enum MpesaTransactionType {
+  STK_PUSH
+  C2B
+  B2C
+}
+
+enum MpesaTransactionStatus {
+  REQUESTED
+  ACKNOWLEDGED
+  CONFIRMED
+  FAILED
+  CANCELLED
+  QUARANTINED
+}
+
+enum DomainEventStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// 1. Organization accounting profile
+// ---------------------------------------------------------------------------
+
+model OrganizationAccountingProfile {
+  id                        String         @id @default(uuid())
+  organizationId            String         @unique
+  functionalCurrency        CurrencyCode   @default(KES)
+  fiscalYearStartMonth      Int            @default(1)
+  fiscalYearStartDay        Int            @default(1)
+  timezone                  String         @default("Africa/Nairobi")
+  isVatRegistered           Boolean        @default(true)
+  vatNumber                 String?
+  whtAgent                  Boolean        @default(false)
+  allowSelfApproval         Boolean        @default(false)
+  journalApprovalThreshold  Decimal        @default(0.00) @db.Decimal(14, 2)
+  billApprovalThreshold     Decimal        @default(0.00) @db.Decimal(14, 2)
+  paymentApprovalThreshold  Decimal        @default(0.00) @db.Decimal(14, 2)
+
+  // Control-account mapping (must point at this organization's own accounts)
+  arControlAccountId        String?
+  apControlAccountId        String?
+  vatOutputAccountId        String?
+  vatInputAccountId         String?
+  whtPayableAccountId       String?
+  suspenseAccountId         String?
+  fxGainAccountId           String?
+  fxLossAccountId           String?
+  retainedEarningsAccountId String?
+
+  // Default accounts for document flows that carry no account on the document
+  // line (a sales invoice line names a product, not a revenue account).
+  defaultRevenueAccountId   String?
+  defaultExpenseAccountId   String?
+  defaultCashAccountId      String?
+
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+
+  organization              Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+}
+
+// ---------------------------------------------------------------------------
+// 2. Fiscal years and accounting periods
+// ---------------------------------------------------------------------------
+
+model FiscalYear {
+  id             String           @id @default(uuid())
+  organizationId String
+  name           String           // e.g. "FY2026"
+  startDate      DateTime
+  endDate        DateTime
+  status         FiscalYearStatus @default(OPEN)
+  closedAt       DateTime?
+  closedBy       String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  periods        AccountingPeriod[]
+  budgets        Budget[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, startDate])
+  @@index([organizationId, status])
+}
+
+model AccountingPeriod {
+  id             String       @id @default(uuid())
+  organizationId String
+  fiscalYearId   String
+  name           String       // e.g. "2026-01"
+  periodNumber   Int          // 1..12
+  startDate      DateTime
+  endDate        DateTime
+  status         PeriodStatus @default(OPEN)
+  closedAt       DateTime?
+  closedBy       String?
+  reopenedAt     DateTime?
+  reopenedBy     String?
+  reopenReason   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear     FiscalYear   @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  journalEntries JournalEntry[]
+
+  @@unique([organizationId, fiscalYearId, periodNumber])
+  @@unique([organizationId, startDate])
+  @@index([organizationId, status])
+  @@index([organizationId, startDate, endDate])
+}
+
+// ---------------------------------------------------------------------------
+// 3. Cost centres / dimensions
+// ---------------------------------------------------------------------------
+
+model CostCentre {
+  id             String       @id @default(uuid())
+  organizationId String
+  code           String
+  name           String
+  departmentId   String?      // links to existing Department; validated in service
+  parentId       String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  parent         CostCentre?  @relation("CostCentreHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children       CostCentre[] @relation("CostCentreHierarchy")
+  journalLines   JournalLine[]
+  budgetLines    BudgetLine[]
+  billLines      SupplierBillLine[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, isActive])
+  @@index([parentId])
+}
+
+// ---------------------------------------------------------------------------
+// 4. Foreign exchange rates
+// ---------------------------------------------------------------------------
+
+model ExchangeRate {
+  id             String             @id @default(uuid())
+  organizationId String
+  fromCurrency   CurrencyCode
+  toCurrency     CurrencyCode
+  rate           Decimal            @db.Decimal(18, 8)
+  rateDate       DateTime
+  source         ExchangeRateSource @default(CBK)
+  sourceRef      String?            // e.g. CBK indicative rate URL / circular reference
+  isOverride     Boolean            @default(false)
+  overrideReason String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdBy      String?
+  createdAt      DateTime           @default(now())
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, fromCurrency, toCurrency, rateDate, source])
+  @@index([organizationId, fromCurrency, toCurrency, rateDate])
+}
+
+// ---------------------------------------------------------------------------
+// 5. Tax rules (effective-dated) and tax transaction snapshots
+// ---------------------------------------------------------------------------
+
+model TaxCode {
+  id                  String          @id @default(uuid())
+  organizationId      String
+  code                String          // e.g. "KE-VAT-STD", "KE-WHT-SERVICES-RESIDENT"
+  name                String
+  kind                TaxKind
+  applicability       TaxApplicability @default(BOTH)
+  ratePercent         Decimal         @db.Decimal(7, 4)
+  isRecoverable       Boolean         @default(true)
+  isCompound          Boolean         @default(false)
+  reverseCharge       Boolean         @default(false)
+  whtRecipientType    String?         // RESIDENT / NON_RESIDENT / UNKNOWN
+  effectiveFrom       DateTime
+  effectiveTo         DateTime?
+  glOutputAccountId   String?
+  glInputAccountId    String?
+  glLiabilityAccountId String?
+  isActive            Boolean         @default(true)
+  version             Int             @default(1)
+  supersedesId        String?
+  legalRef            String?         // e.g. "VAT Act 2013 s.5(1)"
+  notes               String?
+  createdBy           String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  transactions        TaxTransaction[]
+
+  @@unique([organizationId, code, effectiveFrom])
+  @@index([organizationId, kind, effectiveFrom])
+  @@index([organizationId, isActive])
+}
+
+model TaxTransaction {
+  id               String       @id @default(uuid())
+  organizationId   String
+  taxCodeId        String
+  sourceType       String       // SALES_INVOICE / SUPPLIER_BILL / CREDIT_NOTE / JOURNAL
+  sourceId         String
+  taxKind          TaxKind
+  taxableBase      Decimal      @db.Decimal(14, 2)
+  ratePercent      Decimal      @db.Decimal(7, 4)
+  taxAmount        Decimal      @db.Decimal(14, 2)
+  currency         CurrencyCode @default(KES)
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  ruleSnapshotJson String?      @db.Text
+  createdAt        DateTime     @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  taxCode          TaxCode      @relation(fields: [taxCodeId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, sourceType, sourceId])
+  @@index([organizationId, taxKind, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// 6. AR payment allocations (many-to-many payment <-> invoice)
+// ---------------------------------------------------------------------------
+
+model PaymentAllocation {
+  id               String          @id @default(uuid())
+  organizationId   String
+  paymentId        String
+  salesInvoiceId   String
+  amount           Decimal         @db.Decimal(14, 2)
+  allocatedAt      DateTime        @default(now())
+  createdBy        String?
+
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  payment          CustomerPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  salesInvoice     SalesInvoice    @relation(fields: [salesInvoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, salesInvoiceId])
+  @@index([organizationId, salesInvoiceId])
+  @@index([paymentId])
+}
+
+// ---------------------------------------------------------------------------
+// 7. Accounts payable subledger
+// ---------------------------------------------------------------------------
+
+model SupplierBill {
+  id                String             @id @default(uuid())
+  organizationId    String
+  branchId          String
+  supplierId        String
+  billNumber        String             // supplier's own invoice number
+  internalNumber    String
+  billDate          DateTime
+  dueDate           DateTime
+  currency          CurrencyCode       @default(KES)
+  exchangeRate      Decimal            @default(1.00000000) @db.Decimal(18, 8)
+  subtotal          Decimal            @db.Decimal(14, 2)
+  taxAmount         Decimal            @default(0.00) @db.Decimal(14, 2)
+  whtAmount         Decimal            @default(0.00) @db.Decimal(14, 2)
+  totalAmount       Decimal            @db.Decimal(14, 2)
+  paidAmount        Decimal            @default(0.00) @db.Decimal(14, 2)
+  status            SupplierBillStatus @default(DRAFT)
+  purchaseOrderId   String?
+  goodsReceiptRef   String?            // real GRN reference only; never fabricated
+  duplicateHash     String?
+  postedJournalId   String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  rejectionReason   String?
+  createdBy         String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier          Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines             SupplierBillLine[]
+  allocations       SupplierPaymentAllocation[]
+
+  @@unique([organizationId, internalNumber])
+  @@unique([organizationId, supplierId, billNumber])
+  @@index([organizationId, status, dueDate])
+  @@index([supplierId])
+  @@index([branchId])
+}
+
+model SupplierBillLine {
+  id               String       @id @default(uuid())
+  supplierBillId   String
+  description      String
+  quantity         Decimal      @default(1.00) @db.Decimal(12, 2)
+  unitPrice        Decimal      @db.Decimal(14, 2)
+  taxCodeId        String?
+  taxAmount        Decimal      @default(0.00) @db.Decimal(14, 2)
+  whtAmount        Decimal      @default(0.00) @db.Decimal(14, 2)
+  lineTotal        Decimal      @db.Decimal(14, 2)
+  expenseAccountId String
+  costCentreId     String?
+  createdAt        DateTime     @default(now())
+
+  supplierBill     SupplierBill @relation(fields: [supplierBillId], references: [id], onDelete: Restrict)
+  costCentre       CostCentre?  @relation(fields: [costCentreId], references: [id], onDelete: Restrict)
+
+  @@index([supplierBillId])
+  @@index([expenseAccountId])
+  @@index([costCentreId])
+}
+
+model SupplierPayment {
+  id               String          @id @default(uuid())
+  organizationId   String
+  branchId         String
+  supplierId       String
+  paymentNumber    String
+  paymentDate      DateTime
+  amount           Decimal         @db.Decimal(14, 2)
+  currency         CurrencyCode    @default(KES)
+  exchangeRate     Decimal         @default(1.00000000) @db.Decimal(18, 8)
+  paymentMethod    String
+  referenceCode    String
+  whtAmount        Decimal         @default(0.00) @db.Decimal(14, 2)
+  unappliedAmount  Decimal         @default(0.00) @db.Decimal(14, 2)
+  status           PaymentStatus   @default(DRAFT)
+  bankAccountId    String?
+  postedJournalId  String?
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdBy        String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplier         Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  allocations      SupplierPaymentAllocation[]
+
+  @@unique([organizationId, paymentNumber])
+  @@index([organizationId, supplierId, paymentDate])
+}
+
+model SupplierPaymentAllocation {
+  id                String            @id @default(uuid())
+  organizationId    String
+  supplierPaymentId String
+  supplierBillId    String
+  amount            Decimal           @db.Decimal(14, 2)
+  allocatedAt       DateTime          @default(now())
+  createdBy         String?
+
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  supplierPayment   SupplierPayment   @relation(fields: [supplierPaymentId], references: [id], onDelete: Restrict)
+  supplierBill      SupplierBill      @relation(fields: [supplierBillId], references: [id], onDelete: Restrict)
+
+  @@unique([supplierPaymentId, supplierBillId])
+  @@index([organizationId, supplierBillId])
+}
+
+// ---------------------------------------------------------------------------
+// 8. Banking and reconciliation
+// ---------------------------------------------------------------------------
+
+model BankAccount {
+  id               String          @id @default(uuid())
+  organizationId   String
+  branchId         String?
+  name             String
+  type             BankAccountType @default(BANK)
+  accountNumber    String?
+  glAccountId      String
+  currency         CurrencyCode    @default(KES)
+  provider         String?         // e.g. "EQUITY", "KCB", "MPESA"
+  mpesaShortcode   String?
+  openingBalance   Decimal         @default(0.00) @db.Decimal(14, 2)
+  openingDate      DateTime?
+  isActive         Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  glAccount        Account         @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  statements       BankStatement[]
+  reconciliations  BankReconciliation[]
+  mpesaTransactions MpesaTransaction[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+  @@index([glAccountId])
+}
+
+model BankStatement {
+  id               String       @id @default(uuid())
+  organizationId   String
+  bankAccountId    String
+  fileName         String?
+  fileHash         String       // SHA-256 of the imported file; blocks duplicate imports
+  format           String       @default("CSV")
+  statementFrom    DateTime
+  statementTo      DateTime
+  openingBalance   Decimal      @db.Decimal(14, 2)
+  closingBalance   Decimal      @db.Decimal(14, 2)
+  lineCount        Int          @default(0)
+  importedBy       String?
+  importedAt       DateTime     @default(now())
+
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  bankAccount      BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  lines            BankStatementLine[]
+
+  @@unique([organizationId, bankAccountId, fileHash])
+  @@index([organizationId, bankAccountId, statementTo])
+}
+
+model BankStatementLine {
+  id                 String              @id @default(uuid())
+  statementId        String
+  lineNumber         Int
+  valueDate          DateTime
+  description        String
+  reference          String?
+  debit              Decimal             @default(0.00) @db.Decimal(14, 2)
+  credit             Decimal             @default(0.00) @db.Decimal(14, 2)
+  balanceAfter       Decimal?            @db.Decimal(14, 2)
+  fingerprint        String              // hash(valueDate, amount, reference, description)
+  status             StatementLineStatus @default(UNMATCHED)
+  matchedTargetType  String?
+  matchedTargetId    String?
+  createdAt          DateTime            @default(now())
+
+  statement          BankStatement       @relation(fields: [statementId], references: [id], onDelete: Restrict)
+  matches            BankMatch[]
+
+  @@unique([statementId, fingerprint])
+  @@index([statementId, status])
+  @@index([valueDate])
+}
+
+model BankReconciliation {
+  id                      String               @id @default(uuid())
+  organizationId          String
+  bankAccountId           String
+  periodStart             DateTime
+  periodEnd               DateTime
+  statementClosingBalance Decimal              @db.Decimal(14, 2)
+  glClosingBalance        Decimal              @db.Decimal(14, 2)
+  difference              Decimal              @db.Decimal(14, 2)
+  status                  ReconciliationStatus @default(DRAFT)
+  preparedBy              String?
+  finalizedBy             String?
+  finalizedAt             DateTime?
+  reversalReason          String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  organization            Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  bankAccount             BankAccount          @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  matches                 BankMatch[]
+
+  @@index([organizationId, bankAccountId, status])
+  @@index([organizationId, periodEnd])
+}
+
+model BankMatch {
+  id               String                  @id @default(uuid())
+  organizationId   String
+  reconciliationId String
+  statementLineId  String
+  targetType       String                  // JOURNAL_LINE / CUSTOMER_PAYMENT / SUPPLIER_PAYMENT / BANK_FEE
+  targetId         String
+  amount           Decimal                 @db.Decimal(14, 2)
+  matchType        ReconciliationMatchType @default(MANUAL)
+  reason           String?
+  matchedBy        String?
+  matchedAt        DateTime                @default(now())
+
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  reconciliation   BankReconciliation      @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+  statementLine    BankStatementLine       @relation(fields: [statementLineId], references: [id], onDelete: Restrict)
+
+  @@unique([statementLineId, targetType, targetId])
+  @@index([organizationId, reconciliationId])
+}
+
+// ---------------------------------------------------------------------------
+// 9. M-Pesa (Safaricom Daraja) transaction ledger
+// ---------------------------------------------------------------------------
+
+model MpesaTransaction {
+  id                String                  @id @default(uuid())
+  organizationId    String
+  bankAccountId     String?
+  transactionType   MpesaTransactionType
+  merchantRequestId String?
+  checkoutRequestId String?
+  mpesaReceiptNumber String?
+  phoneNumber       String?
+  amount            Decimal                 @db.Decimal(14, 2)
+  currency          CurrencyCode            @default(KES)
+  status            MpesaTransactionStatus  @default(REQUESTED)
+  resultCode        String?
+  resultDesc        String?
+  accountReference  String?
+  rawPayloadJson    String?                 @db.Text
+  idempotencyKey    String                  @unique
+  customerPaymentId String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  bankAccount       BankAccount?            @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status])
+  @@index([organizationId, mpesaReceiptNumber])
+  @@index([checkoutRequestId])
+}
+
+// ---------------------------------------------------------------------------
+// 10. Budgets
+// ---------------------------------------------------------------------------
+
+model Budget {
+  id             String       @id @default(uuid())
+  organizationId String
+  fiscalYearId   String
+  name           String
+  version        Int          @default(1)
+  status         BudgetStatus @default(DRAFT)
+  costCentreId   String?
+  notes          String?
+  createdBy      String?
+  approvedBy     String?
+  approvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  fiscalYear     FiscalYear   @relation(fields: [fiscalYearId], references: [id], onDelete: Restrict)
+  lines          BudgetLine[]
+
+  @@unique([organizationId, fiscalYearId, name, version])
+  @@index([organizationId, status])
+}
+
+model BudgetLine {
+  id             String       @id @default(uuid())
+  organizationId String
+  budgetId       String
+  accountId      String
+  periodNumber   Int          // 1..12 within the fiscal year
+  amount         Decimal      @db.Decimal(14, 2)
+  costCentreId   String?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  budget         Budget       @relation(fields: [budgetId], references: [id], onDelete: Restrict)
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  costCentre     CostCentre?  @relation(fields: [costCentreId], references: [id], onDelete: Restrict)
+
+  @@unique([budgetId, accountId, periodNumber, costCentreId])
+  @@index([organizationId, accountId])
+}
+
+// ---------------------------------------------------------------------------
+// 11. Domain event outbox and atomic document numbering
+// ---------------------------------------------------------------------------
+
+model DomainEventLog {
+  id             String             @id @default(uuid())
+  organizationId String
+  eventType      String             // e.g. "journal.posted", "invoice.posted"
+  aggregateType  String
+  aggregateId    String
+  payloadJson    String             @db.Text
+  status         DomainEventStatus  @default(PENDING)
+  attempts       Int                @default(0)
+  lastError      String?
+  createdAt      DateTime           @default(now())
+  publishedAt    DateTime?
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, status])
+  @@index([aggregateType, aggregateId])
+}
+
+model DocumentSequence {
+  id             String       @id @default(uuid())
+  organizationId String
+  prefix         String       // "JE", "INV", "RCPT", "BILL", "PAY", "CN"
+  scope          String       @default("GLOBAL") // e.g. branch id
+  year           Int
+  nextValue      Int          @default(1)
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, prefix, scope, year])
 }

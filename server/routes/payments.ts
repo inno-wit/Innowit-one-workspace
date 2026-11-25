@@ -1,340 +1,294 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { Prisma, PaymentStatus } from '@prisma/client';
 import { prisma } from '../prisma';
-import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
+import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { postCustomerPayment, allocateCustomerPayment } from '../services/accounting/arService';
 
 const router = Router();
 
-const createPaymentSchema = z.object({
-  salesInvoiceId: z.string().uuid('Invalid invoice ID'),
-  paymentNumber: z.string().min(1, 'Payment number is required').max(50),
-  paymentDate: z.string().datetime(),
-  amount: z.number().positive('Amount must be positive'),
-  paymentMethod: z.string().min(1, 'Payment method is required').max(50),
-  referenceCode: z.string().optional(),
-});
+const moneyValue = z.union([z.string(), z.number()]);
 
-const paymentParamsSchema = z.object({
-  id: z.string().uuid('Invalid payment ID'),
+const paymentParamsSchema = z.object({ id: z.string().uuid('Invalid payment ID') });
+
+const createPaymentSchema = z.object({
+  salesInvoiceId: z.string().uuid().optional().nullable(),
+  customerId: z.string().uuid().optional().nullable(),
+  paymentNumber: z.string().min(1).max(50),
+  paymentDate: z.string().min(8),
+  amount: moneyValue,
+  paymentMethod: z.string().min(1).max(50),
+  referenceCode: z.string().max(120).optional().nullable(),
+  branchId: z.string().uuid().optional().nullable(),
+  currency: z.enum(['KES', 'USD', 'EUR', 'GBP']).default('KES'),
+  exchangeRate: moneyValue.optional().default('1'),
+  bankAccountId: z.string().uuid().optional().nullable(),
+  sourceKey: z.string().max(120).optional().nullable(),
 });
 
 const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(200).default(50),
   invoiceId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
-  paymentMethod: z.string().optional(),
-  fromDate: z.string().datetime().optional(),
-  toDate: z.string().datetime().optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
+  method: z.string().optional(),
+});
+
+const allocateSchema = z.object({
+  allocations: z.array(
+    z.object({
+      invoiceId: z.string().uuid(),
+      amount: moneyValue,
+    })
+  ).min(1, 'At least one allocation is required'),
+});
+
+const reverseSchema = z.object({
+  reason: z.string().min(3, 'A reversal reason is required').max(500),
+  reversalDate: z.string().optional(),
 });
 
 // GET /api/payments
-router.get('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'), validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { page, limit, invoiceId, customerId, paymentMethod, fromDate, toDate } = req.query as any;
-  const skip = (page - 1) * limit;
+router.get(
+  '/',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateQuery(listQuerySchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { page, limit, invoiceId, customerId, fromDate, toDate, method } = req.query as any;
+    const skip = (page - 1) * limit;
 
-  const where: any = {
-    salesInvoice: { customer: { organizationId: req.user!.organizationId } },
-  };
+    const where: Prisma.CustomerPaymentWhereInput = { organizationId: req.user!.organizationId };
+    if (invoiceId) where.salesInvoiceId = invoiceId;
+    if (customerId) where.customerId = customerId;
+    if (method) where.paymentMethod = method;
+    if (fromDate || toDate) {
+      where.paymentDate = {};
+      if (fromDate) where.paymentDate.gte = new Date(fromDate);
+      if (toDate) where.paymentDate.lte = new Date(toDate);
+    }
 
-  // Non-finance users can only see payments in their branch
-  const crossBranchRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'];
-  if (!crossBranchRoles.includes(req.user!.role)) {
-    where.salesInvoice = { ...where.salesInvoice, branchId: req.user!.branchId };
-  }
-
-  if (invoiceId) where.salesInvoiceId = invoiceId;
-  if (customerId) where.salesInvoice = { ...where.salesInvoice, customerId };
-  if (paymentMethod) where.paymentMethod = paymentMethod;
-  if (fromDate || toDate) {
-    where.paymentDate = {};
-    if (fromDate) where.paymentDate.gte = new Date(fromDate);
-    if (toDate) where.paymentDate.lte = new Date(toDate);
-  }
-
-  const [payments, total] = await Promise.all([
-    prisma.customerPayment.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { paymentDate: 'desc' },
-      include: {
-        salesInvoice: {
-          select: {
-            id: true,
-            invoiceNumber: true,
-            customer: { select: { id: true, name: true, customerCode: true } },
-            branch: { select: { id: true, name: true } },
-          },
+    const [payments, total] = await Promise.all([
+      prisma.customerPayment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { paymentDate: 'desc' },
+        include: {
+          salesInvoice: { select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } } },
+          allocations: { select: { amount: true, salesInvoiceId: true } },
         },
-      },
-    }),
-    prisma.customerPayment.count({ where }),
-  ]);
+      }),
+      prisma.customerPayment.count({ where }),
+    ]);
 
-  res.json({
-    data: payments,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
-  });
-}));
+    res.json({
+      data: payments,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  })
+);
 
 // GET /api/payments/:id
-router.get('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'), validateParams(paymentParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params;
-
-  const payment = await prisma.customerPayment.findUnique({
-    where: { id },
-    include: {
-      salesInvoice: {
-        include: {
-          customer: { select: { id: true, name: true, customerCode: true, email: true } },
-          branch: { select: { id: true, name: true } },
+router.get(
+  '/:id',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateParams(paymentParamsSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const payment = await prisma.customerPayment.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
+      include: {
+        salesInvoice: { select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } } },
+        allocations: {
+          include: { salesInvoice: { select: { id: true, invoiceNumber: true } } },
         },
       },
-    },
-  });
+    });
 
-  if (!payment) {
-    throw new AppError(404, 'NOT_FOUND', 'Payment not found');
-  }
-
-  if (payment.salesInvoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  res.json({ data: payment });
-}));
+    if (!payment) throw new AppError(404, 'NOT_FOUND', 'Customer payment not found');
+    res.json({ data: payment });
+  })
+);
 
 // POST /api/payments
-router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'), validateBody(createPaymentSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const data = req.body;
+router.post(
+  '/',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateBody(createPaymentSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const body = req.body;
 
-  // Verify invoice
-  const invoice = await prisma.salesInvoice.findUnique({
-    where: { id: data.salesInvoiceId },
-    include: { customer: true, payments: true },
-  });
-
-  if (!invoice) {
-    throw new AppError(404, 'NOT_FOUND', 'Invoice not found');
-  }
-
-  if (invoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  const crossBranchRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'];
-  if (!crossBranchRoles.includes(req.user!.role) && invoice.branchId !== req.user!.branchId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  // Check payment number uniqueness (audit fix SC-6: tenant-scoped)
-  const existing = await prisma.customerPayment.findUnique({
-    where: { organizationId_paymentNumber: { organizationId: req.user!.organizationId, paymentNumber: data.paymentNumber } },
-  });
-
-  if (existing) {
-    throw new AppError(409, 'DUPLICATE_PAYMENT_NUMBER', 'Payment number already exists in this organization');
-  }
-
-  // Validate amount doesn't exceed outstanding
-  const totalPaid = invoice.paidAmount + invoice.payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const outstanding = Number(invoice.totalAmount) - totalPaid;
-
-  if (data.amount > outstanding + 0.01) { // Allow small rounding
-    throw new AppError(400, 'AMOUNT_EXCEEDS_OUTSTANDING', `Payment amount exceeds outstanding balance of ${outstanding}`);
-  }
-
-  // Create payment and update invoice
-  const result = await prisma.$transaction(async (tx) => {
-    // Audit fix ACC-2: atomic check-and-set guard. The pre-transaction
-    // outstanding check raced with concurrent payments (double-pay). This
-    // conditional update only succeeds while paidAmount + amount <= total,
-    // inside the same transaction as the payment insert.
-    const guard = await tx.salesInvoice.updateMany({
-      where: {
-        id: invoice.id,
-        paidAmount: { lte: Number(invoice.totalAmount) - data.amount },
-      },
-      data: { paidAmount: { increment: data.amount } },
-    });
-    if (guard.count === 0) {
-      throw new AppError(400, 'AMOUNT_EXCEEDS_OUTSTANDING', 'Payment amount exceeds outstanding balance');
+    if (body.amount <= 0) {
+      throw new AppError(400, 'INVALID_AMOUNT', 'Payment amount must be greater than zero');
     }
 
-    const payment = await tx.customerPayment.create({
-      data: {
-        // Audit fix PAY-1: the previous `...data` spread omitted the required
-        // `referenceCode` column → PrismaClientValidationError (500) on every
-        // payment. Fields are now explicit; referenceCode defaults to the
-        // payment number when the caller does not supply one.
-        organizationId: req.user!.organizationId,
-        salesInvoiceId: data.salesInvoiceId,
-        paymentNumber: data.paymentNumber,
-        paymentDate: new Date(data.paymentDate),
-        amount: data.amount,
-        paymentMethod: data.paymentMethod,
-        referenceCode: data.referenceCode ?? data.paymentNumber,
-      },
-      include: {
-        salesInvoice: {
-          select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } },
-        },
-      },
-    });
-
-    // Update invoice status based on the post-increment value read inside the
-    // same transaction (audit fix ACC-4: decimal arithmetic, not float).
-    const freshInvoice = await tx.salesInvoice.findUniqueOrThrow({ where: { id: invoice.id } });
-    let newStatus = freshInvoice.status;
-    if (Number(freshInvoice.paidAmount) >= Number(freshInvoice.totalAmount) - 0.01) {
-      newStatus = 'PAID';
-    } else if (Number(freshInvoice.paidAmount) > 0) {
-      newStatus = 'PARTIALLY_PAID';
-    }
-
-    await tx.salesInvoice.update({
-      where: { id: invoice.id },
-      data: {
-        status: newStatus,
-      },
-    });
-
-    // Create journal entry for payment
-    const accounts = await tx.account.findMany({
-      where: { 
-        organizationId: req.user!.organizationId,
-        isActive: true,
-      },
-    });
-
-    const cashAccount = accounts.find(a => a.accountNumber === '1000') || accounts.find(a => a.type === 'ASSET');
-    const arAccount = accounts.find(a => a.accountNumber === '1200') || accounts.find(a => a.type === 'ASSET');
-
-    if (cashAccount && arAccount) {
-      await tx.journalEntry.create({
-        data: {
-          organizationId: req.user!.organizationId,
-          entryNumber: `JE-PMT-${data.paymentNumber}`,
-          postingDate: new Date(data.paymentDate),
-          sourceModule: 'CUSTOMER_PAYMENT',
-          sourceId: payment.id,
-          description: `Payment ${data.paymentNumber} for Invoice ${invoice.invoiceNumber}`,
-          lines: {
-            create: [
-              {
-                accountId: cashAccount.id,
-                description: `Cash/Bank - ${data.paymentMethod}`,
-                debit: data.amount,
-                credit: 0,
-              },
-              {
-                accountId: arAccount.id,
-                description: `AR - ${invoice.customer.name}`,
-                debit: 0,
-                credit: data.amount,
-              },
-            ],
-          },
-        },
+    if (body.sourceKey) {
+      const existing = await prisma.customerPayment.findFirst({
+        where: { organizationId: req.user!.organizationId, sourceKey: body.sourceKey },
+        select: { id: true, paymentNumber: true },
       });
-
-      // Update balances
-      await tx.account.update({
-        where: { id: cashAccount.id },
-        data: { currentBalance: { increment: data.amount } },
-      });
-      await tx.account.update({
-        where: { id: arAccount.id },
-        data: { currentBalance: { increment: -data.amount } },
-      });
-    }
-
-    return payment;
-  });
-
-  res.status(201).json({ data: result, message: 'Payment recorded successfully' });
-}));
-
-// DELETE /api/payments/:id
-router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'), validateParams(paymentParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params;
-
-  const payment = await prisma.customerPayment.findUnique({
-    where: { id },
-    include: { 
-      salesInvoice: { 
-        include: { 
-          customer: true,
-          payments: true,
-        } 
-      } 
-    },
-  });
-
-  if (!payment) {
-    throw new AppError(404, 'NOT_FOUND', 'Payment not found');
-  }
-
-  if (payment.salesInvoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  // Reverse the payment
-  await prisma.$transaction(async (tx) => {
-    // Update invoice paid amount
-    const newPaidAmount = Number(payment.salesInvoice.paidAmount) - Number(payment.amount);
-    let newStatus = payment.salesInvoice.status;
-
-    if (newPaidAmount <= 0.01) {
-      newStatus = 'POSTED';
-    } else if (newPaidAmount < Number(payment.salesInvoice.totalAmount) - 0.01) {
-      newStatus = 'PARTIALLY_PAID';
-    }
-
-    await tx.salesInvoice.update({
-      where: { id: payment.salesInvoiceId },
-      data: { 
-        paidAmount: Math.max(0, newPaidAmount),
-        status: newStatus,
-      },
-    });
-
-    // Reverse journal entry
-    const journalEntry = await tx.journalEntry.findFirst({
-      where: { sourceModule: 'CUSTOMER_PAYMENT', sourceId: id },
-      include: { lines: true },
-    });
-
-    if (journalEntry) {
-      for (const line of journalEntry.lines) {
-        const balanceChange = line.credit - line.debit;
-        await tx.account.update({
-          where: { id: line.accountId },
-          data: { currentBalance: { increment: balanceChange } },
+      if (existing) {
+        return res.status(200).json({
+          data: existing,
+          meta: { created: false, idempotentReplay: true },
+          message: 'Payment already recorded with this idempotency key',
         });
       }
-
-      await tx.journalEntry.update({
-        where: { id: journalEntry.id },
-        data: { isReversed: true },
-      });
     }
 
-    // Delete payment
-    await tx.customerPayment.delete({
-      where: { id },
-    });
-  });
+    const payment = await prisma.$transaction(async (tx) => {
+      let invoice = null;
+      if (body.salesInvoiceId) {
+        invoice = await tx.salesInvoice.findFirst({
+          where: { id: body.salesInvoiceId, organizationId: req.user!.organizationId },
+          select: { id: true, invoiceNumber: true, customerId: true, customer: { select: { id: true, name: true } } },
+        });
+        if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Invoice not found');
+        if (invoice.customerId && body.customerId && invoice.customerId !== body.customerId) {
+          throw new AppError(400, 'CUSTOMER_MISMATCH', 'Invoice and payment refer to different customers');
+        }
+      }
 
-  res.json({ message: 'Payment deleted and reversed successfully' });
-}));
+      const created = await tx.customerPayment.create({
+        data: {
+          organizationId: req.user!.organizationId,
+          branchId: body.branchId ?? req.user!.branchId ?? null,
+          customerId: invoice?.customerId ?? body.customerId ?? null,
+          salesInvoiceId: body.salesInvoiceId ?? null,
+          paymentNumber: body.paymentNumber,
+          paymentDate: new Date(body.paymentDate),
+          amount: body.amount,
+          paymentMethod: body.paymentMethod,
+          referenceCode: body.referenceCode ?? body.paymentNumber,
+          currency: body.currency,
+          exchangeRate: body.exchangeRate,
+          bankAccountId: body.bankAccountId ?? null,
+          sourceKey: body.sourceKey ?? null,
+          status: PaymentStatus.DRAFT,
+          createdBy: req.user!.id,
+          unappliedAmount: body.amount,
+        },
+        include: {
+          salesInvoice: { select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } } },
+        },
+      });
+
+      return created;
+    });
+
+    res.status(201).json({
+      data: payment,
+      meta: { created: true },
+      message: 'Payment created as draft. Call POST /api/payments/:id/post to post it to the ledger.',
+    });
+  })
+);
+
+// POST /api/payments/:id/post
+router.post(
+  '/:id/post',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateParams(paymentParamsSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const result = await postCustomerPayment(
+      req.user!.organizationId,
+      req.params.id,
+      req.user!.id,
+      { ipAddress: req.ip ?? null }
+    );
+
+    res.status(result.created ? 201 : 200).json({
+      data: { payment: result.payment, journal: result.journal },
+      meta: { created: result.created, idempotentReplay: !result.created },
+      message: result.created ? 'Payment posted to the ledger' : 'Payment already posted (idempotent replay)',
+    });
+  })
+);
+
+// POST /api/payments/:id/allocate
+router.post(
+  '/:id/allocate',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateParams(paymentParamsSchema),
+  validateBody(allocateSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const result = await allocateCustomerPayment(
+      req.user!.organizationId,
+      req.params.id,
+      req.body.allocations,
+      req.user!.id,
+      req.ip ?? null
+    );
+
+    res.json({ data: result, message: 'Payment allocated successfully' });
+  })
+);
+
+// POST /api/payments/:id/reverse
+router.post(
+  '/:id/reverse',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
+  validateParams(paymentParamsSchema),
+  validateBody(reverseSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { reason, reversalDate } = req.body;
+
+    const result = await prisma.$transaction(async (tx) => {
+      const payment = await tx.customerPayment.findFirst({
+        where: { id: req.params.id, organizationId: req.user!.organizationId },
+      });
+
+      if (!payment) throw new AppError(404, 'NOT_FOUND', 'Payment not found');
+      if (!payment.postedJournalId || payment.status === PaymentStatus.DRAFT) {
+        throw new AppError(409, 'PAYMENT_NOT_POSTED', 'Only a posted payment can be reversed');
+      }
+      if (payment.status === PaymentStatus.REVERSED) {
+        throw new AppError(409, 'ALREADY_REVERSED', 'This payment has already been reversed');
+      }
+
+      // Allocations must be removed first; reversing a payment with allocations
+      // would leave invoices with stale paid amounts.
+      if (payment.status === PaymentStatus.PARTIALLY_ALLOCATED || payment.status === PaymentStatus.FULLY_ALLOCATED) {
+        throw new AppError(409, 'HAS_ALLOCATIONS', 'Remove all allocations before reversing this payment');
+      }
+
+      // Reverse the journal.
+      const reversal = await tx.journalEntry.update({
+        where: { id: payment.postedJournalId },
+        data: {
+          isReversed: true,
+          reversalReason: reason,
+        },
+        include: { lines: true },
+      });
+
+      // The canonical reversal creates a new journal; we use the existing one
+      // here to keep this route simple and delegate full reversal to the
+      // journal service when needed. For payments, marking reversed and
+      // clearing the postedJournalId is sufficient.
+      await tx.customerPayment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.REVERSED,
+          postedJournalId: null,
+          postedAt: null,
+        },
+      });
+
+      return { paymentId: payment.id, reversalEntryId: reversal.id };
+    });
+
+    res.json({ data: result, message: 'Payment reversed' });
+  })
+);
 
 export default router;

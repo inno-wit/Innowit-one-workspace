@@ -5,6 +5,7 @@ import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { postSalesInvoice } from '../services/accounting/arService';
 
 const router = Router();
 
@@ -546,122 +547,44 @@ router.post('/:id/validate', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN'
 router.post('/:id/post', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'), validateParams(invoiceParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
 
-  const invoice = await prisma.salesInvoice.findUnique({
-    where: { id },
-    include: { 
-      customer: true, 
-      branch: true, 
-      items: { include: { product: true } },
-      payments: true,
-    },
-  });
-
-  if (!invoice) {
-    throw new AppError(404, 'NOT_FOUND', 'Invoice not found');
-  }
-
-  if (invoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  if (invoice.status !== 'VALIDATED') {
-    throw new AppError(400, 'INVALID_STATUS', 'Only validated invoices can be posted');
-  }
-
-  // Get default accounts (simplified - in real app, these would be configured)
-  const accounts = await prisma.account.findMany({
-    where: { 
+  // Phase 4: the ledger is written by the canonical posting engine, which
+  // enforces balance, period locks, tenant scoping, sourceKey idempotency and
+  // immutable posted journals. The previous handler picked accounts by hardcoded
+  // number, created the journal outside the balance update, and allowed a
+  // duplicate entry on every re-post.
+  const result = await prisma.$transaction((tx) =>
+    postSalesInvoice(tx, {
       organizationId: req.user!.organizationId,
-      isActive: true,
+      invoiceId: id,
+      userId: req.user!.id,
+      ipAddress: req.ip ?? null,
+    })
+  );
+
+  // eTIMS is a separate compliance pipeline. Posting to the GL only enqueues a
+  // submission: POSTED must never be read as "accepted by KRA".
+  await prisma.etimsTransmissionQueue.upsert({
+    where: { idempotencyKey: id },
+    update: {
+      status: 'PENDING',
+      payloadJson: JSON.stringify({ invoiceId: id }),
+      attemptCount: 0,
+      lastError: null,
+      responseJson: null,
+    },
+    create: {
+      salesInvoiceId: id,
+      idempotencyKey: id,
+      status: 'PENDING',
+      payloadJson: JSON.stringify({ invoiceId: id }),
     },
   });
 
-  const arAccount = accounts.find(a => a.accountNumber === '1200') || accounts.find(a => a.type === 'ASSET');
-  const revenueAccount = accounts.find(a => a.accountNumber === '4000') || accounts.find(a => a.type === 'REVENUE');
-  const vatAccount = accounts.find(a => a.accountNumber === '2200') || accounts.find(a => a.type === 'LIABILITY');
-
-  if (!arAccount || !revenueAccount || !vatAccount) {
-    throw new AppError(400, 'MISSING_ACCOUNTS', 'Required accounts not configured (AR, Revenue, VAT)');
-  }
-
-  // Create journal entry and update invoice status in transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Create journal entry
-    const entryNumber = `JE-SI-${invoice.invoiceNumber}`;
-    
-    const journalEntry = await tx.journalEntry.create({
-      data: {
-        organizationId: req.user!.organizationId,
-        entryNumber,
-        postingDate: invoice.invoiceDate,
-        sourceModule: 'SALES_INVOICE',
-        sourceId: invoice.id,
-        description: `Sales Invoice ${invoice.invoiceNumber} - ${invoice.customer.name}`,
-        lines: {
-          create: [
-            {
-              accountId: arAccount.id,
-              description: `AR - ${invoice.customer.name}`,
-              debit: invoice.totalAmount,
-              credit: 0,
-            },
-            {
-              accountId: revenueAccount.id,
-              description: 'Sales Revenue',
-              debit: 0,
-              credit: invoice.subtotal,
-            },
-            {
-              accountId: vatAccount.id,
-              description: 'VAT Output',
-              debit: 0,
-              credit: invoice.taxAmount,
-            },
-          ],
-        },
-      },
-    });
-
-    // Update account balances
-    await tx.account.update({
-      where: { id: arAccount.id },
-      data: { currentBalance: { increment: invoice.totalAmount } },
-    });
-    await tx.account.update({
-      where: { id: revenueAccount.id },
-      data: { currentBalance: { increment: -invoice.subtotal } },
-    });
-    await tx.account.update({
-      where: { id: vatAccount.id },
-      data: { currentBalance: { increment: -invoice.taxAmount } },
-    });
-
-    // Update invoice status
-    const updatedInvoice = await tx.salesInvoice.update({
-      where: { id },
-      data: { status: 'POSTED' },
-    });
-
-    // Update eTIMS queue status (audit fix ETIMS-2/3: upsert with deterministic
-    // idempotencyKey so re-posting the same invoice never duplicates the queue)
-    await tx.etimsTransmissionQueue.upsert({
-      where: { idempotencyKey: id },
-      update: { status: 'PENDING', payloadJson: JSON.stringify({ invoiceId: id }), attemptCount: 0, lastError: null, responseJson: null },
-      create: {
-        salesInvoiceId: id,
-        idempotencyKey: id,
-        status: 'PENDING',
-        payloadJson: JSON.stringify({ invoiceId: id }),
-      },
-    });
-
-    return { journalEntry, updatedInvoice };
-  });
-
-  res.json({ 
-    data: result.updatedInvoice, 
-    journalEntry: result.journalEntry,
-    message: 'Invoice posted to General Ledger and queued for eTIMS submission' 
+  res.json({
+    data: result.invoice,
+    journalEntry: result.journal,
+    meta: { created: result.created, idempotentReplay: !result.created },
+    message: 'Invoice posted to the general ledger and queued for eTIMS submission',
   });
 }));
 
@@ -686,6 +609,16 @@ router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINA
 
   if (invoice.customer.organizationId !== req.user!.organizationId) {
     throw new AppError(403, 'FORBIDDEN', 'Access denied');
+  }
+
+  // A posted invoice is an accounting record: it is never deleted. Correct it
+  // with a credit note, or reverse the journal, and keep both on file.
+  if (invoice.postedJournalId || invoice.status === 'POSTED') {
+    throw new AppError(
+      409,
+      'INVOICE_IMMUTABLE',
+      'A posted invoice cannot be deleted. Issue a credit note instead.'
+    );
   }
 
   if (invoice.payments.length > 0 || invoice.creditNotes.length > 0) {

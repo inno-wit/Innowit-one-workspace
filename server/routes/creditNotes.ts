@@ -1,25 +1,35 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { Prisma, CreditNoteStatus } from '@prisma/client';
 import { prisma } from '../prisma';
-import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '../middleware/auth';
+import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
+import { postCreditNote } from '../services/accounting/arService';
+import { findTaxCode, resolveTaxCode, taxAmountFor, ruleSnapshot, recordTaxTransaction } from '../services/accounting/taxService';
+import { getAccountingProfile, requireMappedAccount } from '../services/accounting/context';
+import { postJournalInTransaction } from '../services/accounting/journal';
+import { emitDomainEvent } from '../services/accounting/audit';
+import { money, mul, dec } from '../services/accounting/money';
 
 const router = Router();
 
+const moneyValue = z.union([z.string(), z.number()]);
+
 const creditNoteItemSchema = z.object({
   productId: z.string().uuid('Invalid product ID'),
-  description: z.string().min(1, 'Description is required').max(500),
-  quantity: z.number().positive('Quantity must be positive'),
-  unitPrice: z.number().nonnegative('Unit price must be non-negative'),
-  taxClassification: z.enum(['STANDARD_16', 'ZERO_RATED', 'EXEMPT', 'WITHHOLDING']).default('STANDARD_16'),
+  description: z.string().min(1).max(500),
+  quantity: moneyValue,
+  unitPrice: moneyValue,
+  taxClassification: z.nativeEnum(Prisma.TaxClassification).default(Prisma.TaxClassification.STANDARD_16),
 });
 
 const createCreditNoteSchema = z.object({
   salesInvoiceId: z.string().uuid('Invalid invoice ID'),
-  creditNoteNumber: z.string().min(1, 'Credit note number is required').max(50),
-  reason: z.string().min(1, 'Reason is required').max(500),
+  creditNoteNumber: z.string().min(1).max(50),
+  reason: z.string().min(1).max(500),
   items: z.array(creditNoteItemSchema).min(1, 'At least one item required'),
+  branchId: z.string().uuid().optional().nullable(),
 });
 
 const creditNoteParamsSchema = z.object({
@@ -31,303 +41,202 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(20),
   invoiceId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
-  fromDate: z.string().datetime().optional(),
-  toDate: z.string().datetime().optional(),
+  fromDate: z.string().optional(),
+  toDate: z.string().optional(),
 });
 
-// Tax calculation helper
-function calculateTax(amount: number, classification: string): number {
-  switch (classification) {
-    case 'STANDARD_16': return amount * 0.16;
-    case 'ZERO_RATED': return 0;
-    case 'EXEMPT': return 0;
-    case 'WITHHOLDING': return amount * 0.05;
-    default: return amount * 0.16;
-  }
-}
+const postSchema = z.object({
+  // Empty body; the credit note is already created as a draft.
+});
 
 // GET /api/credit-notes
-router.get('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'), validateQuery(listQuerySchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { page, limit, invoiceId, customerId, fromDate, toDate } = req.query as any;
-  const skip = (page - 1) * limit;
+router.get(
+  '/',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'),
+  validateQuery(listQuerySchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { page, limit, invoiceId, customerId, fromDate, toDate } = req.query as any;
+    const skip = (page - 1) * limit;
 
-  const where: any = {
-    salesInvoice: { customer: { organizationId: req.user!.organizationId } },
-  };
+    const where: Prisma.CreditNoteWhereInput = {
+      organizationId: req.user!.organizationId,
+      ...(invoiceId ? { salesInvoiceId: invoiceId } : {}),
+      ...(customerId ? { salesInvoice: { customerId } } : {}),
+    };
 
-  const crossBranchRoles: UserRole[] = ['SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'];
-  if (!crossBranchRoles.includes(req.user!.role)) {
-    where.salesInvoice = { ...where.salesInvoice, branchId: req.user!.branchId };
-  }
+    if (fromDate || toDate) {
+      where.issuedAt = {};
+      if (fromDate) where.issuedAt.gte = new Date(fromDate);
+      if (toDate) where.issuedAt.lte = new Date(toDate);
+    }
 
-  if (invoiceId) where.salesInvoiceId = invoiceId;
-  if (customerId) where.salesInvoice = { ...where.salesInvoice, customerId };
-  if (fromDate || toDate) {
-    where.issuedAt = {};
-    if (fromDate) where.issuedAt.gte = new Date(fromDate);
-    if (toDate) where.issuedAt.lte = new Date(toDate);
-  }
+    const [creditNotes, total] = await Promise.all([
+      prisma.creditNote.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { issuedAt: 'desc' },
+        include: {
+          salesInvoice: {
+            select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true, customerCode: true } } },
+          },
+        },
+      }),
+      prisma.creditNote.count({ where }),
+    ]);
 
-  const [creditNotes, total] = await Promise.all([
-    prisma.creditNote.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: { issuedAt: 'desc' },
+    res.json({
+      data: creditNotes,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  })
+);
+
+// GET /api/credit-notes/:id
+router.get(
+  '/:id',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'),
+  validateParams(creditNoteParamsSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const creditNote = await prisma.creditNote.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
       include: {
         salesInvoice: {
-          select: {
-            id: true,
-            invoiceNumber: true,
-            customer: { select: { id: true, name: true, customerCode: true } },
+          include: {
+            customer: { select: { id: true, name: true, customerCode: true, email: true } },
+            items: { include: { product: { select: { id: true, sku: true, name: true } } } },
           },
         },
       },
-    }),
-    prisma.creditNote.count({ where }),
-  ]);
+    });
 
-  res.json({
-    data: creditNotes,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
-  });
-}));
+    if (!creditNote) throw new AppError(404, 'NOT_FOUND', 'Credit note not found');
 
-// GET /api/credit-notes/:id
-router.get('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT', 'SALES_MANAGER'), validateParams(creditNoteParamsSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { id } = req.params;
+    res.json({ data: creditNote });
+  })
+);
 
-  const creditNote = await prisma.creditNote.findUnique({
-    where: { id },
-    include: {
-      salesInvoice: {
-        include: {
-          customer: { select: { id: true, name: true, customerCode: true, email: true } },
-          items: { include: { product: { select: { id: true, sku: true, name: true } } } },
-        },
-      },
-    },
-  });
+// POST /api/credit-notes (create as draft)
+router.post(
+  '/',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateBody(createCreditNoteSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const data = req.body;
 
-  if (!creditNote) {
-    throw new AppError(404, 'NOT_FOUND', 'Credit note not found');
-  }
+    const invoice = await prisma.salesInvoice.findFirst({
+      where: { id: data.salesInvoiceId, organizationId: req.user!.organizationId },
+      include: { customer: true, items: { include: { product: true } } },
+    });
 
-  if (creditNote.salesInvoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
+    if (!invoice) throw new AppError(404, 'NOT_FOUND', 'Invoice not found');
 
-  res.json({ data: creditNote });
-}));
+    const existing = await prisma.creditNote.findFirst({
+      where: { organizationId: req.user!.organizationId, creditNoteNumber: data.creditNoteNumber },
+    });
+    if (existing) throw new AppError(409, 'DUPLICATE_CREDIT_NOTE_NUMBER', 'Credit note number already exists in this organization');
 
-// POST /api/credit-notes
-router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'), validateBody(createCreditNoteSchema), asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const data = req.body;
+    let subtotal = dec(0);
+    let taxTotal = dec(0);
 
-  // Verify invoice
-  const invoice = await prisma.salesInvoice.findUnique({
-    where: { id: data.salesInvoiceId },
-    include: { 
-      customer: true, 
-      items: { include: { product: true } },
-      etimsInvoice: true,
-    },
-  });
+    for (const item of data.items) {
+      const qty = dec(item.quantity);
+      const price = dec(item.unitPrice);
+      const lineSubtotal = mul(qty, price);
+      subtotal = subtotal.plus(lineSubtotal);
 
-  if (!invoice) {
-    throw new AppError(404, 'NOT_FOUND', 'Invoice not found');
-  }
+      const profile = await getAccountingProfile(prisma, req.user!.organizationId);
+      const rule = await resolveTaxCode(
+        prisma,
+        req.user!.organizationId,
+        { code: { 'STANDARD_16': 'KE-VAT-STD', 'ZERO_RATED': 'KE-VAT-ZERO', 'EXEMPT': 'KE-VAT-EXEMPT' }[item.taxClassification] ?? 'KE-VAT-STD' },
+        invoice.invoiceDate,
+        'SALES'
+      );
 
-  if (invoice.customer.organizationId !== req.user!.organizationId) {
-    throw new AppError(403, 'FORBIDDEN', 'Access denied');
-  }
-
-  // Check if invoice has eTIMS record (required for credit notes in Kenya)
-  if (!invoice.etimsInvoice) {
-    throw new AppError(400, 'NO_ETIMS', 'Cannot create credit note for invoice not submitted to eTIMS');
-  }
-
-  // Verify credit note number uniqueness (audit fix SC-6: tenant-scoped)
-  const existing = await prisma.creditNote.findUnique({
-    where: { organizationId_creditNoteNumber: { organizationId: req.user!.organizationId, creditNoteNumber: data.creditNoteNumber } },
-  });
-
-  if (existing) {
-    throw new AppError(409, 'DUPLICATE_CREDIT_NOTE_NUMBER', 'Credit note number already exists in this organization');
-  }
-
-  // Validate items don't exceed original invoice quantities
-  for (const item of data.items) {
-    const originalItem = invoice.items.find(i => i.productId === item.productId);
-    if (!originalItem) {
-      throw new AppError(400, 'INVALID_ITEM', `Product ${item.productId} not in original invoice`);
+      const tax = rule ? taxAmountFor(lineSubtotal, rule.ratePercent) : dec(0);
+      taxTotal = taxTotal.plus(tax);
     }
-    if (item.quantity > Number(originalItem.quantity)) {
-      throw new AppError(400, 'EXCEEDS_ORIGINAL', `Quantity exceeds original invoice quantity for ${originalItem.product.name}`);
-    }
-  }
 
-  // Calculate totals
-  let totalAmount = 0;
-  let taxAmount = 0;
+    const totalAmount = subtotal.plus(taxTotal);
 
-  const itemsWithCalculations = data.items.map((item: any) => {
-    const lineSubtotal = item.quantity * item.unitPrice;
-    const lineTax = calculateTax(lineSubtotal, item.taxClassification);
-    totalAmount += lineSubtotal;
-    taxAmount += lineTax;
-    return {
-      ...item,
-      taxAmount: lineTax,
-      lineTotal: lineSubtotal + lineTax,
-    };
-  });
-
-  // Create credit note and reverse journal entry
-  const creditNote = await prisma.$transaction(async (tx) => {
-    // Create credit note
-    const newCreditNote = await tx.creditNote.create({
+    const creditNote = await prisma.creditNote.create({
       data: {
         organizationId: req.user!.organizationId,
         salesInvoiceId: data.salesInvoiceId,
         creditNoteNumber: data.creditNoteNumber,
         reason: data.reason,
         totalAmount,
-        taxAmount,
+        taxAmount: taxTotal,
+        subtotal,
         issuedAt: new Date(),
+        status: CreditNoteStatus.DRAFT,
+        branchId: data.branchId ?? invoice.branchId,
+        currency: invoice.currency,
+        exchangeRate: invoice.exchangeRate,
+        createdBy: req.user!.id,
       },
       include: {
-        salesInvoice: {
-          select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } },
-        },
+        salesInvoice: { select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } } },
       },
     });
 
-    // Get accounts for reversal
-    const accounts = await tx.account.findMany({
-      where: { 
-        organizationId: req.user!.organizationId,
-        isActive: true,
-      },
+    res.status(201).json({
+      data: creditNote,
+      message: 'Credit note created as draft. Call POST /api/credit-notes/:id/post to post it to the ledger.',
+    });
+  })
+);
+
+// POST /api/credit-notes/:id/post
+router.post(
+  '/:id/post',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateParams(creditNoteParamsSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const result = await postCreditNote(
+      req.user!.organizationId,
+      req.params.id,
+      req.user!.id,
+      { ipAddress: req.ip ?? null }
+    );
+
+    res.status(result.created ? 201 : 200).json({
+      data: { creditNote: result.creditNote, journal: result.journal },
+      meta: { created: result.created, idempotentReplay: !result.created },
+      message: result.created ? 'Credit note posted to the ledger' : 'Credit note already posted (idempotent replay)',
+    });
+  })
+);
+
+// DELETE /api/credit-notes/:id (drafts only)
+router.delete(
+  '/:id',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
+  validateParams(creditNoteParamsSchema),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const creditNote = await prisma.creditNote.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
     });
 
-    const arAccount = accounts.find(a => a.accountNumber === '1200') || accounts.find(a => a.type === 'ASSET');
-    const revenueAccount = accounts.find(a => a.accountNumber === '4000') || accounts.find(a => a.type === 'REVENUE');
-    const vatAccount = accounts.find(a => a.accountNumber === '2200') || accounts.find(a => a.type === 'LIABILITY');
-
-    if (arAccount && revenueAccount && vatAccount) {
-      // Create reversing journal entry
-      await tx.journalEntry.create({
-        data: {
-          organizationId: req.user!.organizationId,
-          entryNumber: `JE-CN-${data.creditNoteNumber}`,
-          postingDate: new Date(),
-          sourceModule: 'CREDIT_NOTE',
-          sourceId: newCreditNote.id,
-          description: `Credit Note ${data.creditNoteNumber} for Invoice ${invoice.invoiceNumber} - ${data.reason}`,
-          lines: {
-            create: [
-              {
-                accountId: revenueAccount.id,
-                description: 'Sales Returns',
-                debit: totalAmount,
-                credit: 0,
-              },
-              {
-                accountId: vatAccount.id,
-                description: 'VAT Output Reversal',
-                debit: taxAmount,
-                credit: 0,
-              },
-              {
-                accountId: arAccount.id,
-                description: `AR - ${invoice.customer.name} (Credit)`,
-                debit: 0,
-                credit: totalAmount + taxAmount,
-              },
-            ],
-          },
-        },
-      });
-
-      // Update balances
-      await tx.account.update({
-        where: { id: arAccount.id },
-        data: { currentBalance: { increment: -(totalAmount + taxAmount) } },
-      });
-      await tx.account.update({
-        where: { id: revenueAccount.id },
-        data: { currentBalance: { increment: -totalAmount } },
-      });
-      await tx.account.update({
-        where: { id: vatAccount.id },
-        data: { currentBalance: { increment: -taxAmount } },
-      });
+    if (!creditNote) throw new AppError(404, 'NOT_FOUND', 'Credit note not found');
+    if (creditNote.status !== CreditNoteStatus.DRAFT) {
+      throw new AppError(
+        409,
+        'CREDIT_NOTE_IMMUTABLE',
+        'A posted credit note cannot be deleted. Reverse the journal instead.'
+      );
     }
 
-    // Create stock movements for returned items
-    for (const item of data.items) {
-      const warehouse = await tx.warehouse.findFirst({
-        where: { branchId: invoice.branchId },
-      });
+    await prisma.creditNote.delete({ where: { id: creditNote.id } });
 
-      if (warehouse) {
-        // Restore stock
-        await tx.warehouseStock.upsert({
-          where: {
-            productId_warehouseId: {
-              productId: item.productId,
-              warehouseId: warehouse.id,
-            },
-          },
-          create: {
-            productId: item.productId,
-            warehouseId: warehouse.id,
-            quantityOnHand: item.quantity,
-            quantityReserved: 0,
-          },
-          update: {
-            quantityOnHand: { increment: item.quantity },
-          },
-        });
-
-        // Create stock movement
-        await tx.stockMovement.create({
-          data: {
-            productId: item.productId,
-            warehouseId: warehouse.id,
-            movementType: 'RETURN',
-            quantity: item.quantity,
-            unitCost: item.unitPrice,
-            referenceDocument: data.creditNoteNumber,
-            notes: `Return from credit note ${data.creditNoteNumber}`,
-          },
-        });
-      }
-    }
-
-    // Create eTIMS transmission queue for credit note
-    await tx.etimsTransmissionQueue.create({
-      data: {
-        salesInvoiceId: data.salesInvoiceId,
-        idempotencyKey: `CN-${data.creditNoteNumber}-${Date.now()}`,
-        status: 'PENDING',
-        payloadJson: JSON.stringify({ creditNoteId: newCreditNote.id, type: 'CREDIT_NOTE' }),
-      },
-    });
-
-    return newCreditNote;
-  });
-
-  res.status(201).json({ 
-    data: creditNote, 
-    message: 'Credit note created, journal entry reversed, stock restored, and queued for eTIMS' 
-  });
-}));
+    res.json({ data: { deleted: true }, message: 'Draft credit note deleted' });
+  })
+);
 
 export default router;
