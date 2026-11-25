@@ -4,7 +4,7 @@
 **Orchestrator:** Principal Engineering Orchestrator (OpenCode)  
 **Branch:** `work/innowit-one-build`  
 **Baseline SHA:** `16ae9c30642be56081b6b8183995fef760c3f246`  
-**Final SHA:** `25aa0732de3c53bd0ced2e39c74d347a2f8c2a30`  
+**Final SHA:** `2796ba350c7331d7e519e2dac1c2e0e8dcf6c2d9`  
 **Working Tree:** Clean (1 untracked user artifact preserved: `docs/PHASE-3-docs.zip`)
 
 ---
@@ -157,7 +157,7 @@ server_version → '17.12'
 ## Git Finalization
 
 **Baseline SHA:** `16ae9c30642be56081b6b8183995fef760c3f246`  
-**Final Commit SHA:** `25aa0732de3c53bd0ced2e39c74d347a2f8c2a30`  
+**Final Commit SHA:** `2796ba350c7331d7e519e2dac1c2e0e8dcf6c2d9`  
 **Commit Message:** `fix(phase3): harden ImportJob multi-tenancy, add integration tests and final test report`
 
 **Working Tree Status (Post-commit):**
