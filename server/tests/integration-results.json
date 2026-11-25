@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-24T13:32:10.489Z",
+  "generatedAt": "2026-11-25T05:19:23.484Z",
   "total": 33,
   "passed": 33,
   "failed": 0,
@@ -122,7 +122,7 @@
       "id": 17,
       "suite": "ACCOUNTING",
       "expected": "Invoice created (201)",
-      "actual": "HTTP 201; id=bc3b6516-e40a-4307-ac07-64d142ec0090; status=DRAFT",
+      "actual": "HTTP 201; id=30efb7ad-f370-4384-8c61-e30ff32d765e; status=DRAFT",
       "pass": true
     },
     {
@@ -235,7 +235,7 @@
       "id": 33,
       "suite": "ETIMS",
       "expected": "Worker against unreachable KRA never marks queue items ACCEPTED",
-      "actual": "pendingBefore=2; after statuses=PENDING,PENDING",
+      "actual": "pendingBefore=6; after statuses=PENDING,PENDING,PENDING,PENDING,PENDING,PENDING",
       "pass": true
     }
   ]

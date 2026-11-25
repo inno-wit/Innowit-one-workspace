@@ -121,4 +121,109 @@ describe('Gate P3.8: CRM Premium Features Integration Tests', () => {
       expect(res.body.data).toBeDefined();
     });
   });
+
+  describe('Import/Export API (RC-09 & Multi-Tenant Isolation)', () => {
+    const sharedIdempotencyKey = `idem-import-${Date.now()}`;
+    let orgAJobId: string;
+
+    it('should create an import job and persist it in PostgreSQL', async () => {
+      const res = await request(app)
+        .post('/api/crm/premium/import')
+        .set('Authorization', `Bearer ${getAdminToken()}`)
+        .send({
+          entityType: 'CUSTOMER',
+          fileUrl: 'https://storage.innowit.ke/imports/customers_2026.csv',
+          mappingJson: JSON.stringify({ FullName: 'name', TaxPIN: 'kraPin', EmailAddress: 'email' }),
+          options: {
+            dryRun: false,
+            idempotencyKey: sharedIdempotencyKey,
+          },
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toBeDefined();
+      expect(res.body.data.id).toBeDefined();
+      expect(res.body.data.organizationId).toBe(testState.testData.orgA.id);
+      expect(res.body.data.status).toBe('PENDING');
+
+      orgAJobId = res.body.data.id;
+
+      // Verify row in PostgreSQL
+      const dbJob = await prisma.importJob.findUnique({
+        where: { id: orgAJobId },
+      });
+      expect(dbJob).not.toBeNull();
+      expect(dbJob!.organizationId).toBe(testState.testData.orgA.id);
+      expect(dbJob!.idempotencyKey).toBe(sharedIdempotencyKey);
+    });
+
+    it('should return existing import job when matching idempotencyKey is replayed for the same organization', async () => {
+      const res = await request(app)
+        .post('/api/crm/premium/import')
+        .set('Authorization', `Bearer ${getAdminToken()}`)
+        .send({
+          entityType: 'CUSTOMER',
+          fileUrl: 'https://storage.innowit.ke/imports/customers_2026.csv',
+          mappingJson: JSON.stringify({ FullName: 'name', TaxPIN: 'kraPin', EmailAddress: 'email' }),
+          options: {
+            dryRun: false,
+            idempotencyKey: sharedIdempotencyKey,
+          },
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toBe('Import already processed');
+      expect(res.body.data.id).toBe(orgAJobId);
+      expect(res.body.data.organizationId).toBe(testState.testData.orgA.id);
+    });
+
+    it('should allow Org B to use the exact same idempotencyKey without collision or leaking Org A data', async () => {
+      const res = await request(app)
+        .post('/api/crm/premium/import')
+        .set('Authorization', `Bearer ${getOtherOrgToken()}`)
+        .send({
+          entityType: 'DEAL',
+          fileUrl: 'https://storage.innowit.ke/imports/orgb_deals.csv',
+          mappingJson: JSON.stringify({ DealTitle: 'title', DealAmount: 'value' }),
+          options: {
+            dryRun: false,
+            idempotencyKey: sharedIdempotencyKey,
+          },
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toBeDefined();
+      expect(res.body.data.id).not.toBe(orgAJobId);
+      expect(res.body.data.organizationId).toBe(testState.testData.orgB.id);
+      expect(res.body.data.entityType).toBe('DEAL');
+    });
+
+    it('should retrieve import job by ID for the owning organization', async () => {
+      const res = await request(app)
+        .get(`/api/crm/premium/import/${orgAJobId}`)
+        .set('Authorization', `Bearer ${getAdminToken()}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.id).toBe(orgAJobId);
+      expect(res.body.data.organizationId).toBe(testState.testData.orgA.id);
+    });
+
+    it('should block Org B from accessing Org A import job by ID with 403 Forbidden', async () => {
+      const res = await request(app)
+        .get(`/api/crm/premium/import/${orgAJobId}`)
+        .set('Authorization', `Bearer ${getOtherOrgToken()}`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('FORBIDDEN');
+    });
+
+    it('should return 404 for non-existent import job ID', async () => {
+      const res = await request(app)
+        .get('/api/crm/premium/import/00000000-0000-0000-0000-000000000000')
+        .set('Authorization', `Bearer ${getAdminToken()}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe('NOT_FOUND');
+    });
+  });
 });

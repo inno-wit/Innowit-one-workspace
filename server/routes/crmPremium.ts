@@ -706,10 +706,15 @@ router.post('/import', authorize('SUPER_ADMIN', 'ADMIN', 'SALES_MANAGER'), valid
   const { entityType, fileUrl, mappingJson, options = {} } = req.body;
   const { dryRun = false, skipDuplicates = false, updateExisting = false, idempotencyKey } = options;
 
-  // Check idempotency
+  // Check idempotency (strictly tenant-scoped to prevent cross-tenant data leakage or collision)
   if (idempotencyKey) {
     const existing = await prisma.importJob.findUnique({
-      where: { idempotencyKey },
+      where: {
+        organizationId_idempotencyKey: {
+          organizationId: req.user!.organizationId,
+          idempotencyKey,
+        },
+      },
     });
     if (existing) {
       return res.json({ data: existing, message: 'Import already processed' });

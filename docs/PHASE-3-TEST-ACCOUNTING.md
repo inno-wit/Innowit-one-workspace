@@ -12,7 +12,7 @@
 |-------|---------|----------|------------|----------|--------|--------|---------|
 | Phase 1 Acceptance | `npm test` | innowit_one_test | 19 | 19 | 19 | 0 | 0 |
 | Phase 1 Integration | `npx tsx server/tests/integration.ts` | innowit_one_test | 33 | 33 | 33 | 0 | 0 |
-| Vitest (Phase 2 + Phase 3 CRM) | `npx vitest run` | innowit_one_test | 137 | 137 | 137 | 0 | 0 |
+| Vitest (Phase 2 + CRM + ImportJob) | `npx vitest run` | innowit_one_test | 143 | 143 | 143 | 0 | 0 |
 | TypeScript | `npx tsc --noEmit` | N/A | N/A | N/A | ✅ | 0 | 0 |
 | Vite Build | `npm run build` | N/A | N/A | N/A | ✅ | 0 | 0 |
 | Tauri Check | `cd src-tauri && cargo check -q` | N/A | N/A | N/A | ✅ | 0 | 0 |
@@ -65,24 +65,24 @@
 
 | Test File | Tests | Passed |
 |-----------|-------|--------|
-| attachments.integration.test.ts | 8 | 8 |
-| channels.integration.test.ts | 12 | 12 |
+| attachments.integration.test.ts | 7 | 7 |
+| channels.integration.test.ts | 24 | 24 |
 | crm-analytics.integration.test.ts | 4 | 4 |
-| crm-premium.integration.test.ts | 4 | 4 |
+| crm-premium.integration.test.ts | 10 | 10 |
 | crm-quotation-order.integration.test.ts | 3 | 3 |
-| crm-tenant-security.integration.test.ts | 7 | 7 |
+| crm-tenant-security.integration.test.ts | 13 | 13 |
 | customers.integration.test.ts | 12 | 12 |
 | deal-stage-concurrency.integration.test.ts | 3 | 3 |
 | deals.integration.test.ts | 9 | 9 |
 | dm-concurrency.test.ts | 8 | 8 |
-| messages.integration.test.ts | 18 | 18 |
-| notifications.integration.test.ts | 6 | 6 |
-| read-cursor.test.ts | 5 | 5 |
-| realtime.integration.test.ts | 14 | 14 |
+| messages.integration.test.ts | 17 | 17 |
+| notifications.integration.test.ts | 9 | 9 |
+| read-cursor.test.ts | 9 | 9 |
+| realtime.integration.test.ts | 11 | 11 |
 | sales-reps.integration.test.ts | 4 | 4 |
-| **Total** | **137** | **137** |
+| **Total** | **143** | **143** |
 
-**Note:** The 137 tests include both Phase 2 (collaboration, messages, channels, etc.) and Phase 3 CRM tests. The 8 CRM-specific files contain 46 tests (12+9+3+4+4+4+7+3=46), and the remaining 91 tests are Phase 2 regression tests. No double-counting.
+**Note:** The 143 tests include both Phase 2 (collaboration, messages, channels, etc.) and Phase 3 CRM tests (including 10 in crm-premium.integration.test.ts with 6 multi-tenant ImportJob integration tests). No double-counting.
 
 ---
 
@@ -92,8 +92,8 @@
 |----------|-----------------|------------------|-------|
 | Phase 1 Acceptance | 19 | 19 | No overlap with other suites |
 | Phase 1 Integration | 33 | 33 | No overlap with Vitest (different runner) |
-| Vitest | 137 | 137 | Includes 91 Phase 2 + 46 Phase 3 CRM |
-| **Unique Total** | **189** | **189** | 19 + 33 + 137 = 189 unique checks |
+| Vitest | 137 | 143 | Includes Phase 2 retained + Phase 3 CRM + ImportJob integration |
+| **Unique Total** | **189** | **195** | 19 + 33 + 143 = 195 unique checks |
 
 **No double-counting detected:** The Phase 1 integration runner (`server/tests/integration.ts`) is a separate process from Vitest. The Vitest suite includes both Phase 2 and Phase 3 CRM tests. The 91 Phase 2 tests are part of the 137 Vitest total, not additional.
 

@@ -58,7 +58,7 @@ export async function initializeTestDatabase(): Promise<void> {
   testState.initialized = true;
   console.log('[db-singleton] Initializing test database...');
 
-  testDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/innowit_one?schema=public';
+  testDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/innowit_one_test?schema=public';
   process.env.DATABASE_URL = testDbUrl;
 
   // Ensure connection
@@ -214,6 +214,7 @@ async function cleanGlobalTestData(prisma: PrismaClient) {
   await prisma.fileAttachment.deleteMany({ where: { organizationId: { in: testOrgIds } } });
   await prisma.sharedNote.deleteMany({ where: { authorId: { in: orgAUserIds } } });
   await prisma.notificationPreference.deleteMany({ where: { userId: { in: orgAUserIds } } });
+  await prisma.importJob.deleteMany({ where: { organizationId: { in: testOrgIds } } });
   await prisma.user.deleteMany({ where: { email: { contains: '@orga.com' } } });
   await prisma.user.deleteMany({ where: { email: { contains: '@orgb.com' } } });
   await prisma.branch.deleteMany({ where: { organizationId: { in: testOrgIds } } });

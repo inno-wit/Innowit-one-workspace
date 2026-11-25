@@ -32,7 +32,7 @@ model ImportJob {
   mappingJson         String            @db.Text
   status              ImportJobStatus   @default(PENDING)
   optionsJson         String?           @db.Text
-  idempotencyKey      String?           @unique
+  idempotencyKey      String?
   processedCount      Int               @default(0)
   succeededCount      Int               @default(0)
   failedCount         Int               @default(0)
@@ -79,20 +79,32 @@ npx prisma generate
 
 **File:** `server/routes/crmPremium.ts`
 
-The following calls now resolve correctly:
-- `prisma.importJob.findUnique({ where: { idempotencyKey } })` ✅
+The following calls now resolve correctly with strict tenant isolation:
+- `prisma.importJob.findUnique({ where: { organizationId_idempotencyKey: { organizationId, idempotencyKey } } })` ✅
 - `prisma.importJob.create({ data: {...} })` ✅
 - `prisma.importJob.findUnique({ where: { id } })` ✅
 
-**Idempotency Logic:** Route checks for existing job by `idempotencyKey` before creating (lines 710-717).
-
-**Tenant Isolation:** Route verifies `job.organizationId === req.user!.organizationId` (line 766).
+**Idempotency & Multi-Tenancy Logic:**
+- Route enforces compound organization scoping (`organizationId_idempotencyKey`) on duplicate check (lines 710-721).
+- Distinct tenants can reuse identical idempotency keys (e.g., standard batch names or UUIDs) with zero collision or cross-tenant data leakage.
+- Unauthenticated or cross-tenant access to another organization's import job returns 403 Forbidden.
 
 ---
 
 ## Integration Test Verification
 
-**Test Script:** `scripts/test-importjob.ts`
+**Automated Vitest Suite:** `server/tests/crm-premium.integration.test.ts` (6 dedicated ImportJob tests):
+1. `should create an import job and persist it in PostgreSQL` (201 Created)
+2. `should return existing import job when matching idempotencyKey is replayed for the same organization` (200 OK, idempotent replay)
+3. `should allow Org B to use the exact same idempotencyKey without collision or leaking Org A data` (201 Created, tenant-scoped)
+4. `should retrieve import job by ID for the owning organization` (200 OK)
+5. `should block Org B from accessing Org A import job by ID with 403 Forbidden` (403 Forbidden)
+6. `should return 404 for non-existent import job ID` (404 Not Found)
+
+**Database Teardown Harness:**
+- `server/tests/db-singleton.ts` and `server/tests/test-db.ts` updated to clean `prisma.importJob` before user deletion, preventing foreign key constraint violations during test suite teardown.
+
+**Test Script:** `scripts/test-importjob.ts` (CLI standalone check passing)
 
 **Results:**
 ```

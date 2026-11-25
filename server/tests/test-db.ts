@@ -13,7 +13,7 @@ let prisma: PrismaClient;
 let testDbUrl: string;
 
 export async function setupTestDatabase(): Promise<{ prisma: PrismaClient; dbUrl: string }> {
-  testDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/innowit_one?schema=public';
+  testDbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/innowit_one_test?schema=public';
   process.env.DATABASE_URL = testDbUrl;
 
   prisma = new PrismaClient({
@@ -142,6 +142,7 @@ export async function cleanTestData(prisma: PrismaClient) {
   await prisma.fileAttachment.deleteMany({ where: { message: { channelId: { in: channelIds } } } });
   await prisma.sharedNote.deleteMany({ where: { authorId: { in: orgAUserIds } } });
   await prisma.notificationPreference.deleteMany({ where: { userId: { in: orgAUserIds } } });
+  await prisma.importJob.deleteMany({ where: { organizationId: { in: testOrgIds } } });
   // DO NOT delete users, branches, organizations - they are base fixtures that persist across test runs
 }
 

@@ -29,9 +29,6 @@ CREATE TABLE "ImportJob" (
 CREATE UNIQUE INDEX "ImportJob_organizationId_idempotencyKey_key" ON "ImportJob"("organizationId", "idempotencyKey");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ImportJob_idempotencyKey_key" ON "ImportJob"("idempotencyKey");
-
--- CreateIndex
 CREATE INDEX "ImportJob_organizationId_idx" ON "ImportJob"("organizationId");
 
 -- CreateIndex
