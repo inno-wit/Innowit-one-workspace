@@ -311,7 +311,7 @@ async function acquireSourceLock(
   sourceKey: string
 ): Promise<void> {
   const lockKey = `${organizationId}:${sourceModule}:${sourceKey}`;
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`;
 }
 
 /**
@@ -467,7 +467,7 @@ export async function postJournalInTransaction(
   }
 
   return {
-    journal: journal as PostJournalResult['journal'],
+    journal: journal as unknown as PostJournalResult['journal'],
     created: true,
   };
 }

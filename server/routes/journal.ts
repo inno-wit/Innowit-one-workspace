@@ -232,8 +232,8 @@ router.post(
       exchangeRate: body.exchangeRate,
       status: body.status,
       entryNumber: body.entryNumber,
-      createdBy: req.user!.id,
-      postedBy: req.user!.id,
+      createdBy: req.user!.userId,
+      postedBy: req.user!.userId,
       strictPrecision: true,
       ipAddress: req.ip ?? null,
       lines: body.lines,
@@ -275,14 +275,14 @@ router.put(
       }
 
       if (body.lines) {
-        await normaliseJournalLines(tx, organizationId, body.lines, {
+        const normalised = await normaliseJournalLines(tx, organizationId, body.lines, {
           strictPrecision: true,
           exchangeRate: entry.exchangeRate,
         });
 
         await tx.journalLine.deleteMany({ where: { journalEntryId: entry.id } });
         await tx.journalLine.createMany({
-          data: body.lines.map((line: any) => ({
+          data: normalised.lines.map((line) => ({
             journalEntryId: entry.id,
             accountId: line.accountId,
             description: line.description ?? null,
@@ -290,8 +290,8 @@ router.put(
             credit: line.credit,
             currency: entry.currency,
             fxRate: entry.exchangeRate,
-            baseDebit: line.debit,
-            baseCredit: line.credit,
+            baseDebit: line.baseDebit,
+            baseCredit: line.baseCredit,
             costCentreId: line.costCentreId ?? null,
             dimensionTag: line.dimensionTag ?? null,
           })),
@@ -324,7 +324,7 @@ router.post(
     const result = await postDraftJournal(
       req.user!.organizationId,
       req.params.id,
-      req.user!.id,
+      req.user!.userId,
       { ipAddress: req.ip ?? null }
     );
     res.json({ data: result.journal, meta: { created: result.created } });
@@ -343,7 +343,7 @@ router.post(
       organizationId: req.user!.organizationId,
       journalId: req.params.id,
       reason: req.body.reason,
-      reversedBy: req.user!.id,
+      reversedBy: req.user!.userId,
       reversalDate: req.body.reversalDate,
     });
 
@@ -377,7 +377,7 @@ router.delete(
       await tx.auditLog.create({
         data: {
           organizationId,
-          userId: req.user!.id,
+          userId: req.user!.userId,
           action: 'DELETE',
           entityType: 'JournalEntry',
           entityId: entry.id,

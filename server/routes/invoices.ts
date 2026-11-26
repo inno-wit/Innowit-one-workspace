@@ -6,6 +6,7 @@ import { authenticateToken, AuthenticatedRequest, authorize, UserRole } from '..
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
 import { postSalesInvoice } from '../services/accounting/arService';
+import { dec, money, mul } from '../services/accounting/money';
 
 const router = Router();
 
@@ -138,7 +139,7 @@ router.get('/:id', authenticateToken, validateParams(invoiceParamsSchema), async
   const invoice = await prisma.salesInvoice.findUnique({
     where: { id },
     include: {
-      customer: { select: { id: true, name: true, customerCode: true, email: true, phone: true, billingAddress: true, kraPin: true } },
+      customer: { select: { id: true, organizationId: true, name: true, customerCode: true, email: true, phone: true, billingAddress: true, kraPin: true } },
       branch: { select: { id: true, name: true, branchCode: true, address: true } },
       salesOrder: { select: { id: true, orderNumber: true } },
       items: {
@@ -267,12 +268,16 @@ router.post('/', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_M
 
       if (salesOrder) {
         // Find warehouse
-        const warehouse = await tx.warehouse.findFirst({
-          where: { branchId: salesOrder.customer.branchId },
-        });
+        const warehouse = salesOrder.customer.branchId
+          ? await tx.warehouse.findFirst({
+              where: { branchId: salesOrder.customer.branchId },
+            })
+          : null;
 
         if (warehouse) {
           for (const item of salesOrder.items) {
+            const product = products.find((p) => p.id === item.productId);
+            if (!product) continue;
             const stockLevel = await tx.warehouseStock.findUnique({
               where: {
                 productId_warehouseId: {
@@ -453,20 +458,22 @@ router.put('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE
       throw new AppError(400, 'INVALID_PRODUCT', 'One or more products not found');
     }
 
-    subtotal = 0;
-    taxAmount = 0;
+    let nextSubtotal = dec(0);
+    let nextTaxAmount = dec(0);
     itemsWithCalculations = data.items.map((item: any) => {
-      const lineSubtotal = item.quantity * item.unitPrice;
-      const lineTax = calculateTax(lineSubtotal, item.taxClassification);
-      subtotal += lineSubtotal;
-      taxAmount += lineTax;
+      const lineSubtotal = mul(item.quantity, item.unitPrice);
+      const lineTax = dec(calculateTax(Number(lineSubtotal.toFixed(2)), item.taxClassification));
+      nextSubtotal = nextSubtotal.plus(lineSubtotal);
+      nextTaxAmount = nextTaxAmount.plus(lineTax);
       return {
         ...item,
-        taxAmount: lineTax,
-        lineTotal: lineSubtotal + lineTax,
+        taxAmount: money(lineTax),
+        lineTotal: money(lineSubtotal.plus(lineTax)),
       };
     });
-    totalAmount = subtotal + taxAmount;
+    subtotal = money(nextSubtotal);
+    taxAmount = money(nextTaxAmount);
+    totalAmount = money(nextSubtotal.plus(nextTaxAmount));
   }
 
   const updatedInvoice = await prisma.$transaction(async (tx) => {
@@ -521,6 +528,7 @@ router.post('/:id/validate', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN'
 
   const invoice = await prisma.salesInvoice.findUnique({
     where: { id },
+    include: { customer: { select: { organizationId: true } } },
   });
 
   if (!invoice) {
@@ -556,7 +564,7 @@ router.post('/:id/post', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'F
     postSalesInvoice(tx, {
       organizationId: req.user!.organizationId,
       invoiceId: id,
-      userId: req.user!.id,
+      userId: req.user!.userId,
       ipAddress: req.ip ?? null,
     })
   );
@@ -627,31 +635,6 @@ router.delete('/:id', authenticateToken, authorize('SUPER_ADMIN', 'ADMIN', 'FINA
 
   if (invoice.etimsInvoice) {
     throw new AppError(400, 'ETIMS_SUBMITTED', 'Cannot delete invoice submitted to eTIMS');
-  }
-
-  // If posted, reverse journal entry
-  if (invoice.status === 'POSTED') {
-    const journalEntry = await prisma.journalEntry.findFirst({
-      where: { sourceModule: 'SALES_INVOICE', sourceId: id },
-      include: { lines: true },
-    });
-
-    if (journalEntry) {
-      // Reverse balances
-      for (const line of journalEntry.lines) {
-        const balanceChange = line.credit - line.debit;
-        await prisma.account.update({
-          where: { id: line.accountId },
-          data: { currentBalance: { increment: balanceChange } },
-        });
-      }
-
-      // Mark as reversed
-      await prisma.journalEntry.update({
-        where: { id: journalEntry.id },
-        data: { isReversed: true },
-      });
-    }
   }
 
   // Delete invoice (cascades to items and transmission jobs)

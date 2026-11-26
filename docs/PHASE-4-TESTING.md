@@ -1,53 +1,34 @@
 # Phase 4 — Test Evidence (F4.0–F4.10)
 
-## Baseline Regression
-```
+## Full Vitest Suite (Phase 1–4)
+```powershell
 $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/innowit_one_test?schema=public'
 npx vitest run
 ```
-**Result:** 15 test files, 143 tests, all passing (59.04s)
+- **Phase 1–3 Baseline:** 15 test files, 143 tests passing
+- **Phase 4 Accounting & Financial Engine (`server/tests/phase4-accounting.integration.test.ts`):** 1 test file, 9 integration tests passing against real PostgreSQL (`innowit_one_test`)
+- **Aggregate:** 16 test files, 152 tests passing
 
-## Mandatory Scenarios (§18) — Coverage
+## Mandatory Scenarios (§18) — Verified Coverage
 
-| Scenario | Test File(s) | Status |
-|----------|--------------|--------|
-| COA hierarchy: parent/child, postable enforcement, control account blocking | `accounts.test.ts`, `journal.test.ts` | Existing |
-| Fiscal periods: OPEN/SOFT_CLOSED/CLOSED transitions, lazy year creation | `periods.test.ts` | Existing |
-| GL balanced posting: two-line minimum, single-sided, exact balance | `journal.test.ts` | Existing |
-| Draft → post workflow, period re-validation | `journal.test.ts` | Existing |
-| Exact reversal with lineage, double-reversal blocked | `journal.test.ts` | Existing |
-| Idempotent post (same sourceKey returns original) | `journal.test.ts` | Existing |
-| Multi-currency: FX rate capture, baseDebit/baseCredit, conversion | `fx.test.ts` | Existing |
-| Sales invoice post: AR/Revenue/VAT, tax snapshot, status transitions | `invoices.test.ts` | Existing |
-| Customer receipt: draft→post, unapplied cash, bank vs cash source | `payments.test.ts` | Existing |
-| Payment allocation: exact, partial, over-allocation rejection (both levels) | `payments.test.ts` | Existing |
-| Credit note: draft→post, revenue/VAT reversal, AR credit | `creditNotes.test.ts` | Existing |
-| Realized FX on foreign-currency invoice settlement | `ar.test.ts` | Existing |
-| Supplier bill: duplicate fingerprint, VAT recoverable, WHT liability | `supplierBills.test.ts` | **New** |
-| Supplier payment: draft→post, unapplied cash | `supplierPayments.test.ts` | **New** |
-| Supplier allocation: exact, partial, over-allocation rejection | `supplierPayments.test.ts` | **New** |
-| AP ageing buckets match control account | `ap.test.ts` | **New** |
-| Bank statement import: CSV parse, fileHash duplicate block | `bank.test.ts` | **New** |
-| Auto-match: exact rules, ambiguity handling | `bank.test.ts` | **New** |
-| Reconciliation finalize: difference ≠ 0 blocked, preparer ≠ finalizer | `bank.test.ts` | **New** |
-| M-Pesa callback: idempotency key, CONFIRMED only on resultCode 0/1032 | `mpesa.test.ts` | **New** |
-| M-Pesa link: exact amount enforcement | `mpesa.test.ts` | **New** |
-| Tax resolution: effective-dated, code vs id, VAT catalogue seed | `tax.test.ts` | **New** |
-| VAT summary: output/input/net by rule applied | `tax.test.ts` | **New** |
-| Unrealized FX revaluation: AR/AP open items, per-currency buckets | `fx.test.ts` | **New** |
-| Reports: TB balanced, P&L=rev-exp, BS assets=liab+equity, AR/AP tie to control | `reports.test.ts` | **New** |
-| Budget variance: budget lines vs actual posted, utilisation % | `budgets.test.ts` | **New** |
-| Balance cache reconciliation: drift report, apply corrections | `journal.test.ts` | Existing |
+All scenarios below are executed against `innowit_one_test` in `server/tests/phase4-accounting.integration.test.ts`:
+
+| Gate | Scenario | Status |
+|------|----------|--------|
+| **F4.1** | Lazy fiscal year & 12-period creation, `OPEN -> CLOSED -> REOPEN` (with reason & audit), closed-period posting rejected (`409`) | PASS |
+| **F4.2** | Unbalanced, single-line, dual-sided, summary, inactive, control, and cross-tenant lines rejected; balanced post idempotent (`sourceKey`); posted edit blocked (`409`); exact reversal once; balance cache zero drift | PASS |
+| **F4.3** | Sales invoice post creates balanced GL journal + eTIMS `PENDING` queue (never `ACCEPTED`); partial payment allocation; over-allocation rejected; credit note posting | PASS |
+| **F4.4** | Supplier bill draft -> post (input VAT), duplicate supplier invoice blocked, supplier payment post/allocate/reverse (with GL reversal) | PASS |
+| **F4.5** | Kenyan VAT catalogue seed, tax code creation with optional GL accounts, effective-date boundary resolution | PASS |
+| **F4.6** | FX rate capture, inverted conversion, `fx-revaluation` using tenant functional currency | PASS |
+| **F4.7** | Bank account GL `ASSET` validation, CSV statement import & duplicate `fileHash` block, reconciliation segregation of duties (`preparer !== finalizer`), M-Pesa callback idempotency & `resultCode === '0'` confirmation rule (`1032` not confirmed) | PASS |
+| **F4.8** | Trial Balance (`debit === credit`, `balanced: true`), Balance Sheet (`balanced: true`, `difference === '0.00'`), P&L, Cash Flow, VAT summary (output vs input), Budget creation & self-approval block, Org B tenant isolation | PASS |
 
 ## Test DB Safety
 - `vitest.config.ts`: `setupFiles: ['server/tests/db-singleton.ts']`
-- `global-setup.ts` guards: aborts if `current_database() !== 'innowit_one_test'`
-- **Never** runs against `innowit_one` (dev DB with pre-existing drift)
-
-## TypeScript
-`npx tsc --noEmit` — 0 errors
+- `db-singleton.ts` cleans Phase 1–4 test data in FK order before re-seeding
+- **Never** runs against `innowit_one` (dev DB)
 
 ## Migration Integrity
-- 3 Phase-4 migrations applied to `innowit_one_test`
-- `prisma migrate status`: 9 migrations, up to date
-- Zero destructive operations in any migration
+- 11 migrations in `prisma/migrations` (8 prior + 3 Phase-4 additive migrations)
+- `prisma migrate status` on `innowit_one_test`: 11 migrations, database schema is up to date

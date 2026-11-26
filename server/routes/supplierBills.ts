@@ -51,7 +51,7 @@ const listQuery = z.object({
 
 // GET /api/suppliers/bills
 router.get(
-  '/suppliers/bills',
+  '/bills',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateQuery(listQuery),
@@ -75,7 +75,7 @@ router.get(
         take: limit,
         orderBy: { billDate: 'desc' },
         include: {
-          supplier: { select: { id: true, name: true, supplierCode: true } },
+          supplier: { select: { id: true, name: true } },
           _count: { select: { lines: true, allocations: true } },
         },
       }),
@@ -88,7 +88,7 @@ router.get(
 
 // GET /api/suppliers/bills/:id
 router.get(
-  '/suppliers/bills/:id',
+  '/bills/:id',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(billParams),
@@ -96,7 +96,7 @@ router.get(
     const bill = await prisma.supplierBill.findFirst({
       where: { id: req.params.id, organizationId: req.user!.organizationId },
       include: {
-        supplier: { select: { id: true, name: true, supplierCode: true, kraPin: true, email: true } },
+        supplier: { select: { id: true, name: true, kraPin: true, email: true } },
         lines: { include: { costCentre: { select: { id: true, code: true, name: true } } } },
         allocations: { include: { supplierPayment: { select: { id: true, paymentNumber: true, paymentDate: true } } } },
       },
@@ -110,7 +110,7 @@ router.get(
 
 // POST /api/suppliers/bills (create as draft)
 router.post(
-  '/suppliers/bills',
+  '/bills',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER'),
   validateBody(createBillSchema),
@@ -187,7 +187,7 @@ router.post(
         purchaseOrderId: body.purchaseOrderId ?? null,
         goodsReceiptRef: body.goodsReceiptRef ?? null,
         status: SupplierBillStatus.DRAFT,
-        createdBy: req.user!.id,
+        createdBy: req.user!.userId,
         lines: {
           create: linesWithCalc.map((l) => ({
             description: l.description,
@@ -217,16 +217,18 @@ router.post(
 
 // POST /api/suppliers/bills/:id/post
 router.post(
-  '/suppliers/bills/:id/post',
+  '/bills/:id/post',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(billParams),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await postSupplierBill(
-      req.user!.organizationId,
-      req.params.id,
-      req.user!.id,
-      { ipAddress: req.ip ?? null }
+    const result = await prisma.$transaction((tx) =>
+      postSupplierBill(tx, {
+        organizationId: req.user!.organizationId,
+        billId: req.params.id,
+        userId: req.user!.userId,
+        ipAddress: req.ip ?? null,
+      })
     );
 
     res.status(result.created ? 201 : 200).json({

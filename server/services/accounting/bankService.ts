@@ -522,7 +522,7 @@ export async function recordMpesaCallback(
   }
 
   const status =
-    input.resultCode === '0' || input.resultCode === '1032'
+    input.resultCode === '0'
       ? MpesaTransactionStatus.CONFIRMED
       : input.resultCode
         ? MpesaTransactionStatus.FAILED

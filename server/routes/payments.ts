@@ -130,7 +130,7 @@ router.post(
 
     if (body.sourceKey) {
       const existing = await prisma.customerPayment.findFirst({
-        where: { organizationId: req.user!.organizationId, sourceKey: body.sourceKey },
+        where: { organizationId: req.user!.organizationId, providerRef: body.sourceKey },
         select: { id: true, paymentNumber: true },
       });
       if (existing) {
@@ -169,9 +169,9 @@ router.post(
           currency: body.currency,
           exchangeRate: body.exchangeRate,
           bankAccountId: body.bankAccountId ?? null,
-          sourceKey: body.sourceKey ?? null,
+          providerRef: body.sourceKey ?? null,
           status: PaymentStatus.DRAFT,
-          createdBy: req.user!.id,
+          createdBy: req.user!.userId,
           unappliedAmount: body.amount,
         },
         include: {
@@ -197,11 +197,13 @@ router.post(
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(paymentParamsSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await postCustomerPayment(
-      req.user!.organizationId,
-      req.params.id,
-      req.user!.id,
-      { ipAddress: req.ip ?? null }
+    const result = await prisma.$transaction((tx) =>
+      postCustomerPayment(tx, {
+        organizationId: req.user!.organizationId,
+        paymentId: req.params.id,
+        userId: req.user!.userId,
+        ipAddress: req.ip ?? null,
+      })
     );
 
     res.status(result.created ? 201 : 200).json({
@@ -220,12 +222,13 @@ router.post(
   validateParams(paymentParamsSchema),
   validateBody(allocateSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await allocateCustomerPayment(
-      req.user!.organizationId,
-      req.params.id,
-      req.body.allocations,
-      req.user!.id,
-      req.ip ?? null
+    const result = await prisma.$transaction((tx) =>
+      allocateCustomerPayment(tx, {
+        organizationId: req.user!.organizationId,
+        paymentId: req.params.id,
+        allocations: req.body.allocations,
+        userId: req.user!.userId,
+      })
     );
 
     res.json({ data: result, message: 'Payment allocated successfully' });
@@ -241,51 +244,37 @@ router.post(
   validateBody(reverseSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { reason, reversalDate } = req.body;
+    const { reverseJournal } = await import('../services/accounting/journal');
 
-    const result = await prisma.$transaction(async (tx) => {
-      const payment = await tx.customerPayment.findFirst({
-        where: { id: req.params.id, organizationId: req.user!.organizationId },
-      });
-
-      if (!payment) throw new AppError(404, 'NOT_FOUND', 'Payment not found');
-      if (!payment.postedJournalId || payment.status === PaymentStatus.DRAFT) {
-        throw new AppError(409, 'PAYMENT_NOT_POSTED', 'Only a posted payment can be reversed');
-      }
-      if (payment.status === PaymentStatus.REVERSED) {
-        throw new AppError(409, 'ALREADY_REVERSED', 'This payment has already been reversed');
-      }
-
-      // Allocations must be removed first; reversing a payment with allocations
-      // would leave invoices with stale paid amounts.
-      if (payment.status === PaymentStatus.PARTIALLY_ALLOCATED || payment.status === PaymentStatus.FULLY_ALLOCATED) {
-        throw new AppError(409, 'HAS_ALLOCATIONS', 'Remove all allocations before reversing this payment');
-      }
-
-      // Reverse the journal.
-      const reversal = await tx.journalEntry.update({
-        where: { id: payment.postedJournalId },
-        data: {
-          isReversed: true,
-          reversalReason: reason,
-        },
-        include: { lines: true },
-      });
-
-      // The canonical reversal creates a new journal; we use the existing one
-      // here to keep this route simple and delegate full reversal to the
-      // journal service when needed. For payments, marking reversed and
-      // clearing the postedJournalId is sufficient.
-      await tx.customerPayment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentStatus.REVERSED,
-          postedJournalId: null,
-          postedAt: null,
-        },
-      });
-
-      return { paymentId: payment.id, reversalEntryId: reversal.id };
+    const payment = await prisma.customerPayment.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
     });
+
+    if (!payment) throw new AppError(404, 'NOT_FOUND', 'Payment not found');
+    if (!payment.postedJournalId || payment.status === PaymentStatus.DRAFT) {
+      throw new AppError(409, 'PAYMENT_NOT_POSTED', 'Only a posted payment can be reversed');
+    }
+    if (payment.status === PaymentStatus.REVERSED) {
+      throw new AppError(409, 'ALREADY_REVERSED', 'This payment has already been reversed');
+    }
+    if (payment.status === PaymentStatus.PARTIALLY_ALLOCATED || payment.status === PaymentStatus.FULLY_ALLOCATED) {
+      throw new AppError(409, 'HAS_ALLOCATIONS', 'Remove all allocations before reversing this payment');
+    }
+
+    const { reversal } = await reverseJournal({
+      organizationId: req.user!.organizationId,
+      journalId: payment.postedJournalId,
+      reason,
+      reversedBy: req.user!.userId,
+      reversalDate,
+    });
+
+    await prisma.customerPayment.update({
+      where: { id: payment.id },
+      data: { status: PaymentStatus.REVERSED },
+    });
+
+    const result = { paymentId: payment.id, reversalEntryId: reversal.id };
 
     res.json({ data: result, message: 'Payment reversed' });
   })

@@ -210,12 +210,21 @@ export async function vatSummary(
     include: { taxCode: { select: { code: true, name: true } } },
   });
 
-  const bucket = new Map<string, VatSummaryRow>();
+  const outputBucket = new Map<string, VatSummaryRow>();
+  const inputBucket = new Map<string, VatSummaryRow>();
+
+  const isVatKind = (kind: TaxKind) =>
+    kind === TaxKind.VAT_STANDARD ||
+    kind === TaxKind.VAT_ZERO ||
+    kind === TaxKind.VAT_EXEMPT ||
+    kind === TaxKind.VAT_REVERSE_CHARGE;
 
   for (const row of rows) {
-    if (row.taxKind === TaxKind.NONE) continue;
+    if (row.taxKind === TaxKind.NONE || !isVatKind(row.taxKind)) continue;
+    const isPurchase = row.sourceType === 'SUPPLIER_BILL';
+    const targetBucket = isPurchase ? inputBucket : outputBucket;
     const key = `${row.taxCodeId}:${row.ratePercent.toString()}`;
-    const existing = bucket.get(key);
+    const existing = targetBucket.get(key);
     const base = money(row.taxableBase);
     const amount = money(row.taxAmount);
 
@@ -223,7 +232,7 @@ export async function vatSummary(
       existing.taxableBase = money(existing.taxableBase).plus(base).toFixed(2);
       existing.taxAmount = money(existing.taxAmount).plus(amount).toFixed(2);
     } else {
-      bucket.set(key, {
+      targetBucket.set(key, {
         taxCodeId: row.taxCodeId,
         code: row.taxCode.code,
         name: row.taxCode.name,
@@ -235,13 +244,8 @@ export async function vatSummary(
     }
   }
 
-  const isOutput = (kind: TaxKind) =>
-    kind === TaxKind.VAT_STANDARD ||
-    kind === TaxKind.VAT_ZERO ||
-    kind === TaxKind.VAT_REVERSE_CHARGE;
-
-  const output = Array.from(bucket.values()).filter((r) => isOutput(r.kind));
-  const input = Array.from(bucket.values()).filter((r) => !isOutput(r.kind));
+  const output = Array.from(outputBucket.values());
+  const input = Array.from(inputBucket.values());
 
   const outputTotal = output.reduce((acc, r) => acc.plus(money(r.taxAmount)), new Prisma.Decimal(0));
   const inputTotal = input.reduce((acc, r) => acc.plus(money(r.taxAmount)), new Prisma.Decimal(0));

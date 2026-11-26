@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { Prisma, CreditNoteStatus } from '@prisma/client';
+import { Prisma, CreditNoteStatus, TaxClassification } from '@prisma/client';
 import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
@@ -21,7 +21,7 @@ const creditNoteItemSchema = z.object({
   description: z.string().min(1).max(500),
   quantity: moneyValue,
   unitPrice: moneyValue,
-  taxClassification: z.nativeEnum(Prisma.TaxClassification).default(Prisma.TaxClassification.STANDARD_16),
+  taxClassification: z.nativeEnum(TaxClassification).default(TaxClassification.STANDARD_16),
 });
 
 const createCreditNoteSchema = z.object({
@@ -152,7 +152,7 @@ router.post(
       const rule = await resolveTaxCode(
         prisma,
         req.user!.organizationId,
-        { code: { 'STANDARD_16': 'KE-VAT-STD', 'ZERO_RATED': 'KE-VAT-ZERO', 'EXEMPT': 'KE-VAT-EXEMPT' }[item.taxClassification] ?? 'KE-VAT-STD' },
+        { code: ({ STANDARD_16: 'KE-VAT-STD', ZERO_RATED: 'KE-VAT-ZERO', EXEMPT: 'KE-VAT-EXEMPT' } as Record<string, string>)[item.taxClassification] ?? 'KE-VAT-STD' },
         invoice.invoiceDate,
         'SALES'
       );
@@ -177,7 +177,7 @@ router.post(
         branchId: data.branchId ?? invoice.branchId,
         currency: invoice.currency,
         exchangeRate: invoice.exchangeRate,
-        createdBy: req.user!.id,
+        createdBy: req.user!.userId,
       },
       include: {
         salesInvoice: { select: { id: true, invoiceNumber: true, customer: { select: { id: true, name: true } } } },
@@ -198,11 +198,13 @@ router.post(
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(creditNoteParamsSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await postCreditNote(
-      req.user!.organizationId,
-      req.params.id,
-      req.user!.id,
-      { ipAddress: req.ip ?? null }
+    const result = await prisma.$transaction((tx) =>
+      postCreditNote(tx, {
+        organizationId: req.user!.organizationId,
+        creditNoteId: req.params.id,
+        userId: req.user!.userId,
+        ipAddress: req.ip ?? null,
+      })
     );
 
     res.status(result.created ? 201 : 200).json({

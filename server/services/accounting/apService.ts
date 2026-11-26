@@ -116,7 +116,8 @@ export async function postSupplierBill(
   const expenseLines: Array<{
     accountId: string;
     description: string;
-    debit: Prisma.Decimal;
+    debit?: Prisma.Decimal;
+    credit?: Prisma.Decimal;
     costCentreId?: string | null;
   }> = [];
 

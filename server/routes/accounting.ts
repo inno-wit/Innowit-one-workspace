@@ -1,14 +1,26 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
-import { CurrencyCode, PeriodStatus, Prisma } from '@prisma/client';
+import {
+  BankAccountType,
+  BudgetStatus,
+  CurrencyCode,
+  ExchangeRateSource,
+  MpesaTransactionStatus,
+  MpesaTransactionType,
+  PeriodStatus,
+  Prisma,
+  ReconciliationStatus,
+  TaxApplicability,
+  TaxKind,
+} from '@prisma/client';
 import { prisma } from '../prisma';
 import { authenticateToken, AuthenticatedRequest, authorize } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { asyncHandler, AppError } from '../middleware/errorHandler';
-import { recordAudit } from '../services/accounting/audit';
+import { recordAudit, emitDomainEvent } from '../services/accounting/audit';
 import { currentPeriod, resolvePostingPeriod } from '../services/accounting/periods';
-import { getAccountingProfile, requireMappedAccount, requireAccountInOrg } from '../services/accounting/context';
-import { seedKenyanVatCodes } from '../services/accounting/taxService';
+import { functionalCurrency, getAccountingProfile, requireMappedAccount, requireAccountInOrg } from '../services/accounting/context';
+import { seedKenyanVatCodes, vatSummary } from '../services/accounting/taxService';
 import { captureRate, toFunctional } from '../services/accounting/fxService';
 import { createBankAccount, parseStatementCsv, importStatement, autoMatch, finalizeReconciliation, startReconciliation } from '../services/accounting/bankService';
 import { recordMpesaCallback, linkMpesaToPayment, mpesaIdempotencyKey } from '../services/accounting/bankService';
@@ -24,8 +36,8 @@ const moneyValue = z.union([z.string(), z.number()]);
 const taxCodeSchema = z.object({
   code: z.string().min(2).max(30),
   name: z.string().min(1).max(120),
-  kind: z.nativeEnum(Prisma.TaxKind),
-  applicability: z.nativeEnum(Prisma.TaxApplicability).default(Prisma.TaxApplicability.BOTH),
+  kind: z.nativeEnum(TaxKind),
+  applicability: z.nativeEnum(TaxApplicability).default(TaxApplicability.BOTH),
   ratePercent: moneyValue,
   isRecoverable: z.boolean().optional(),
   isCompound: z.boolean().optional(),
@@ -77,9 +89,15 @@ router.post(
       if (to < from) throw new AppError(400, 'INVALID_DATES', 'effectiveTo cannot be before effectiveFrom');
     }
 
-    await requireAccountInOrg(prisma, req.user!.organizationId, body.glOutputAccountId ?? '', 'output account');
-    await requireAccountInOrg(prisma, req.user!.organizationId, body.glInputAccountId ?? '', 'input account');
-    await requireAccountInOrg(prisma, req.user!.organizationId, body.glLiabilityAccountId ?? '', 'liability account');
+    if (body.glOutputAccountId) {
+      await requireAccountInOrg(prisma, req.user!.organizationId, body.glOutputAccountId, 'output account');
+    }
+    if (body.glInputAccountId) {
+      await requireAccountInOrg(prisma, req.user!.organizationId, body.glInputAccountId, 'input account');
+    }
+    if (body.glLiabilityAccountId) {
+      await requireAccountInOrg(prisma, req.user!.organizationId, body.glLiabilityAccountId, 'liability account');
+    }
 
     const code = await prisma.taxCode.create({
       data: {
@@ -101,7 +119,7 @@ router.post(
         isActive: body.isActive ?? true,
         legalRef: body.legalRef ?? null,
         notes: body.notes ?? null,
-        createdBy: req.user!.id,
+        createdBy: req.user!.userId,
       },
     });
 
@@ -159,7 +177,7 @@ router.post(
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await prisma.$transaction((tx) => seedKenyanVatCodes(tx, req.user!.organizationId, req.user!.id));
+    const result = await prisma.$transaction((tx) => seedKenyanVatCodes(tx, req.user!.organizationId, req.user!.userId));
     res.json({ data: result, message: 'Kenyan VAT codes seeded' });
   })
 );
@@ -173,7 +191,7 @@ const exchangeRateSchema = z.object({
   toCurrency: z.nativeEnum(CurrencyCode),
   rate: moneyValue,
   rateDate: z.string().min(8),
-  source: z.nativeEnum(Prisma.ExchangeRateSource).optional(),
+  source: z.nativeEnum(ExchangeRateSource).optional(),
   sourceRef: z.string().max(200).optional().nullable(),
   isOverride: z.boolean().optional(),
   overrideReason: z.string().max(500).optional().nullable(),
@@ -208,7 +226,7 @@ router.post(
   validateBody(exchangeRateSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await prisma.$transaction((tx) =>
-      captureRate(tx, { ...req.body, rateDate: new Date(req.body.rateDate), organizationId: req.user!.organizationId, createdBy: req.user!.id })
+      captureRate(tx, { ...req.body, rateValue: req.body.rate, rateDate: new Date(req.body.rateDate), organizationId: req.user!.organizationId, createdBy: req.user!.userId })
     );
     res.status(201).json({ data: result });
   })
@@ -234,7 +252,7 @@ router.get(
 
 const bankAccountSchema = z.object({
   name: z.string().min(1).max(120),
-  type: z.nativeEnum(Prisma.BankAccountType).optional(),
+  type: z.nativeEnum(BankAccountType).optional(),
   accountNumber: z.string().max(64).optional().nullable(),
   glAccountId: z.string().uuid(),
   currency: z.nativeEnum(CurrencyCode).optional(),
@@ -325,7 +343,7 @@ router.post(
         openingBalance: body.openingBalance,
         closingBalance: body.closingBalance,
         lines,
-        importedBy: body.importedBy ?? req.user!.id,
+        importedBy: body.importedBy ?? req.user!.userId,
       })
     );
 
@@ -372,7 +390,7 @@ router.post(
         periodStart: new Date(req.body.periodStart),
         periodEnd: new Date(req.body.periodEnd),
         statementClosingBalance: req.body.statementClosingBalance,
-        preparedBy: req.body.preparedBy ?? req.user!.id,
+        preparedBy: req.body.preparedBy ?? req.user!.userId,
       })
     );
     res.status(201).json({ data: reconciliation });
@@ -386,7 +404,7 @@ router.post(
   validateParams(reconciliationParams),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await prisma.$transaction((tx) =>
-      autoMatch(tx, { organizationId: req.user!.organizationId, reconciliationId: req.params.id, userId: req.user!.id })
+      autoMatch(tx, { organizationId: req.user!.organizationId, reconciliationId: req.params.id, userId: req.user!.userId })
     );
     res.json({ data: result, message: `Auto-matched ${result.matched} lines; ${result.unmatched} remain unmatched` });
   })
@@ -399,7 +417,7 @@ router.post(
   validateParams(reconciliationParams),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const result = await prisma.$transaction((tx) =>
-      finalizeReconciliation(tx, { organizationId: req.user!.organizationId, reconciliationId: req.params.id, userId: req.user!.id, allowSelfApproval: false })
+      finalizeReconciliation(tx, { organizationId: req.user!.organizationId, reconciliationId: req.params.id, userId: req.user!.userId, allowSelfApproval: false })
     );
     res.json({ data: result, message: 'Reconciliation finalized' });
   })
@@ -409,7 +427,7 @@ router.get(
   '/bank-reconciliation',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
-  validateQuery(z.object({ page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().positive().max(200).default(50), bankAccountId: z.string().uuid().optional(), status: z.nativeEnum(Prisma.ReconciliationStatus).optional() })),
+  validateQuery(z.object({ page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().positive().max(200).default(50), bankAccountId: z.string().uuid().optional(), status: z.nativeEnum(ReconciliationStatus).optional() })),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { page, limit, bankAccountId, status } = req.query as any;
     const where: Prisma.BankReconciliationWhereInput = { organizationId: req.user!.organizationId };
@@ -436,7 +454,7 @@ router.post(
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateBody(z.object({
-    transactionType: z.nativeEnum(Prisma.MpesaTransactionType),
+    transactionType: z.nativeEnum(MpesaTransactionType),
     amount: moneyValue,
     idempotencyKey: z.string().min(1).max(128),
     mpesaReceiptNumber: z.string().optional().nullable(),
@@ -476,7 +494,7 @@ router.get(
   '/mpesa',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
-  validateQuery(z.object({ page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().positive().max(200).default(50), status: z.nativeEnum(Prisma.MpesaTransactionStatus).optional() })),
+  validateQuery(z.object({ page: z.coerce.number().int().positive().default(1), limit: z.coerce.number().int().positive().max(200).default(50), status: z.nativeEnum(MpesaTransactionStatus).optional() })),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { page, limit, status } = req.query as any;
     const where: Prisma.MpesaTransactionWhereInput = { organizationId: req.user!.organizationId };
@@ -524,7 +542,7 @@ router.post(
           name: req.body.name,
           costCentreId: req.body.costCentreId ?? null,
           notes: req.body.notes ?? null,
-          createdBy: req.user!.id,
+          createdBy: req.user!.userId,
         },
       });
 
@@ -543,6 +561,32 @@ router.post(
     });
 
     res.status(201).json({ data: budget });
+  })
+);
+
+router.post(
+  '/budgets/:id/approve',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER'),
+  validateParams(budgetParams),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const budget = await prisma.budget.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
+    });
+    if (!budget) throw new AppError(404, 'NOT_FOUND', 'Budget not found');
+    if (budget.createdBy && budget.createdBy === req.user!.userId) {
+      throw new AppError(403, 'SEGREGATION_OF_DUTIES', 'Budget creator cannot approve their own budget');
+    }
+
+    const updated = await prisma.budget.update({
+      where: { id: budget.id },
+      data: {
+        status: BudgetStatus.APPROVED,
+        approvedBy: req.user!.userId,
+        approvedAt: new Date(),
+      },
+    });
+    res.json({ data: updated, message: 'Budget approved' });
   })
 );
 
@@ -621,7 +665,7 @@ router.get(
   validateQuery(z.object({ asOf: z.string().optional() })),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { arAgeing } = await import('../services/accounting/reportService');
-    const result = await arAgeing(prisma, req.user!.organizationId, req.query.asOf ? new Date(req.query.asOf) : new Date());
+    const result = await arAgeing(prisma, req.user!.organizationId, req.query.asOf ? new Date(String(req.query.asOf)) : new Date());
     res.json({ data: result });
   })
 );
@@ -633,7 +677,7 @@ router.get(
   validateQuery(z.object({ asOf: z.string().optional() })),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { apAgeing } = await import('../services/accounting/apService');
-    const result = await apAgeing(prisma, req.user!.organizationId, req.query.asOf ? new Date(req.query.asOf) : new Date());
+    const result = await apAgeing(prisma, req.user!.organizationId, req.query.asOf ? new Date(String(req.query.asOf)) : new Date());
     res.json({ data: result });
   })
 );
@@ -671,8 +715,176 @@ router.get(
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { asOf } = req.query as any;
     const { computeRevaluation } = await import('../services/accounting/fxService');
-    const result = await prisma.$transaction((tx) => computeRevaluation(tx, req.user!.organizationId, CurrencyCode.KES, new Date(asOf)));
+    const result = await prisma.$transaction(async (tx) => {
+      const fnCurrency = await functionalCurrency(tx, req.user!.organizationId);
+      return computeRevaluation(tx, req.user!.organizationId, fnCurrency, new Date(asOf));
+    });
     res.json({ data: result });
+  })
+);
+
+router.get(
+  '/reports/vat-summary',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  validateQuery(reportQuery),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { from, to } = req.query as any;
+    const result = await vatSummary(prisma, req.user!.organizationId, new Date(from), new Date(to));
+    res.json({ data: result });
+  })
+);
+
+// ============================================================================
+// Fiscal years & accounting periods
+// ============================================================================
+
+router.get(
+  '/fiscal-years',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    await currentPeriod(req.user!.organizationId);
+    const years = await prisma.fiscalYear.findMany({
+      where: { organizationId: req.user!.organizationId },
+      include: { periods: { orderBy: { periodNumber: 'asc' } } },
+      orderBy: { startDate: 'desc' },
+    });
+    res.json({ data: years });
+  })
+);
+
+router.get(
+  '/periods',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'EXECUTIVE', 'FINANCE_MANAGER', 'ACCOUNTANT'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    await currentPeriod(req.user!.organizationId);
+    const periods = await prisma.accountingPeriod.findMany({
+      where: { organizationId: req.user!.organizationId },
+      orderBy: { startDate: 'asc' },
+    });
+    res.json({ data: periods });
+  })
+);
+
+const periodParams = z.object({ id: z.string().uuid() });
+
+router.post(
+  '/periods/:id/soft-close',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
+  validateParams(periodParams),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const period = await prisma.accountingPeriod.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
+    });
+    if (!period) throw new AppError(404, 'NOT_FOUND', 'Accounting period not found');
+    if (period.status === PeriodStatus.CLOSED) {
+      throw new AppError(409, 'PERIOD_CLOSED', 'A closed period must be reopened before soft-closing');
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.accountingPeriod.update({
+        where: { id: period.id },
+        data: { status: PeriodStatus.SOFT_CLOSED },
+      });
+      await recordAudit(tx, {
+        organizationId: req.user!.organizationId,
+        userId: req.user!.userId,
+        action: 'PERIOD_SOFT_CLOSED',
+        entityType: 'AccountingPeriod',
+        entityId: period.id,
+        changes: { status: PeriodStatus.SOFT_CLOSED },
+      });
+      return next;
+    });
+    res.json({ data: updated, message: `Period ${updated.name} soft-closed` });
+  })
+);
+
+router.post(
+  '/periods/:id/close',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
+  validateParams(periodParams),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const period = await prisma.accountingPeriod.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
+    });
+    if (!period) throw new AppError(404, 'NOT_FOUND', 'Accounting period not found');
+    if (period.status === PeriodStatus.CLOSED) {
+      return res.json({ data: period, message: `Period ${period.name} is already closed` });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.accountingPeriod.update({
+        where: { id: period.id },
+        data: {
+          status: PeriodStatus.CLOSED,
+          closedBy: req.user!.userId,
+          closedAt: new Date(),
+        },
+      });
+      await recordAudit(tx, {
+        organizationId: req.user!.organizationId,
+        userId: req.user!.userId,
+        action: 'PERIOD_CLOSED',
+        entityType: 'AccountingPeriod',
+        entityId: period.id,
+        changes: { status: PeriodStatus.CLOSED },
+      });
+      await emitDomainEvent(tx, {
+        organizationId: req.user!.organizationId,
+        eventType: 'period.closed',
+        aggregateType: 'AccountingPeriod',
+        aggregateId: period.id,
+        payload: { name: period.name },
+      });
+      return next;
+    });
+    res.json({ data: updated, message: `Period ${updated.name} closed` });
+  })
+);
+
+router.post(
+  '/periods/:id/reopen',
+  authenticateToken,
+  authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
+  validateParams(periodParams),
+  validateBody(z.object({ reason: z.string().min(3).max(500) })),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const period = await prisma.accountingPeriod.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
+    });
+    if (!period) throw new AppError(404, 'NOT_FOUND', 'Accounting period not found');
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const next = await tx.accountingPeriod.update({
+        where: { id: period.id },
+        data: {
+          status: PeriodStatus.OPEN,
+          reopenReason: req.body.reason,
+        },
+      });
+      await recordAudit(tx, {
+        organizationId: req.user!.organizationId,
+        userId: req.user!.userId,
+        action: 'PERIOD_REOPENED',
+        entityType: 'AccountingPeriod',
+        entityId: period.id,
+        changes: { status: PeriodStatus.OPEN, reason: req.body.reason },
+      });
+      await emitDomainEvent(tx, {
+        organizationId: req.user!.organizationId,
+        eventType: 'period.reopened',
+        aggregateType: 'AccountingPeriod',
+        aggregateId: period.id,
+        payload: { name: period.name, reason: req.body.reason },
+      });
+      return next;
+    });
+    res.json({ data: updated, message: `Period ${updated.name} reopened` });
   })
 );
 

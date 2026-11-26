@@ -7,7 +7,7 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { asyncHandler, AppError } from '../middleware/errorHandler';
 import { postSupplierPayment, allocateSupplierPayment, apAgeing } from '../services/accounting/apService';
 import { requireMappedAccount, requireAccountInOrg } from '../services/accounting/context';
-import { postJournalInTransaction } from '../services/accounting/journal';
+import { postJournalInTransaction, reverseJournal } from '../services/accounting/journal';
 import { emitDomainEvent } from '../services/accounting/audit';
 import { money, mul, dec } from '../services/accounting/money';
 
@@ -57,7 +57,7 @@ const listQuery = z.object({
 
 // GET /api/suppliers/payments
 router.get(
-  '/suppliers/payments',
+  '/payments',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateQuery(listQuery),
@@ -81,7 +81,7 @@ router.get(
         take: limit,
         orderBy: { paymentDate: 'desc' },
         include: {
-          supplier: { select: { id: true, name: true, supplierCode: true } },
+          supplier: { select: { id: true, name: true } },
           allocations: { include: { supplierBill: { select: { id: true, internalNumber: true } } } },
         },
       }),
@@ -94,7 +94,7 @@ router.get(
 
 // GET /api/suppliers/payments/:id
 router.get(
-  '/suppliers/payments/:id',
+  '/payments/:id',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(paymentParams),
@@ -102,7 +102,7 @@ router.get(
     const payment = await prisma.supplierPayment.findFirst({
       where: { id: req.params.id, organizationId: req.user!.organizationId },
       include: {
-        supplier: { select: { id: true, name: true, supplierCode: true } },
+        supplier: { select: { id: true, name: true } },
         allocations: { include: { supplierBill: { select: { id: true, internalNumber: true } } } },
       },
     });
@@ -114,7 +114,7 @@ router.get(
 
 // POST /api/suppliers/payments (create as draft)
 router.post(
-  '/suppliers/payments',
+  '/payments',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'PROCUREMENT_OFFICER', 'FINANCE_MANAGER'),
   validateBody(createPaymentSchema),
@@ -131,7 +131,7 @@ router.post(
 
     if (body.sourceKey) {
       const existing = await prisma.supplierPayment.findFirst({
-        where: { organizationId: req.user!.organizationId, sourceKey: body.sourceKey },
+        where: { organizationId: req.user!.organizationId, referenceCode: body.sourceKey },
         select: { id: true, paymentNumber: true },
       });
       if (existing) {
@@ -152,14 +152,13 @@ router.post(
         paymentDate: new Date(body.paymentDate),
         amount: body.amount,
         paymentMethod: body.paymentMethod,
-        referenceCode: body.referenceCode ?? body.paymentNumber,
+        referenceCode: body.referenceCode ?? body.sourceKey ?? body.paymentNumber,
         currency: body.currency,
         exchangeRate: body.exchangeRate,
         whtAmount: body.whtAmount ?? 0,
         bankAccountId: body.bankAccountId ?? null,
-        sourceKey: body.sourceKey ?? null,
         status: PaymentStatus.DRAFT,
-        createdBy: req.user!.id,
+        createdBy: req.user!.userId,
         unappliedAmount: body.amount,
       },
     });
@@ -174,16 +173,18 @@ router.post(
 
 // POST /api/suppliers/payments/:id/post
 router.post(
-  '/suppliers/payments/:id/post',
+  '/payments/:id/post',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(paymentParams),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await postSupplierPayment(
-      req.user!.organizationId,
-      req.params.id,
-      req.user!.id,
-      { ipAddress: req.ip ?? null }
+    const result = await prisma.$transaction((tx) =>
+      postSupplierPayment(tx, {
+        organizationId: req.user!.organizationId,
+        paymentId: req.params.id,
+        userId: req.user!.userId,
+        ipAddress: req.ip ?? null,
+      })
     );
 
     res.status(result.created ? 201 : 200).json({
@@ -196,17 +197,19 @@ router.post(
 
 // POST /api/suppliers/payments/:id/allocate
 router.post(
-  '/suppliers/payments/:id/allocate',
+  '/payments/:id/allocate',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER', 'ACCOUNTANT'),
   validateParams(paymentParams),
   validateBody(allocateSchema),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const result = await allocateSupplierPayment(
-      req.user!.organizationId,
-      req.params.id,
-      req.body.allocations,
-      req.user!.id
+    const result = await prisma.$transaction((tx) =>
+      allocateSupplierPayment(tx, {
+        organizationId: req.user!.organizationId,
+        paymentId: req.params.id,
+        allocations: req.body.allocations,
+        userId: req.user!.userId,
+      })
     );
 
     res.json({ data: result, message: 'Supplier payment allocated successfully' });
@@ -215,7 +218,7 @@ router.post(
 
 // POST /api/suppliers/payments/:id/reverse
 router.post(
-  '/suppliers/payments/:id/reverse',
+  '/payments/:id/reverse',
   authenticateToken,
   authorize('SUPER_ADMIN', 'ADMIN', 'FINANCE_MANAGER'),
   validateParams(paymentParams),
@@ -223,30 +226,35 @@ router.post(
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { reason, reversalDate } = req.body;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const payment = await tx.supplierPayment.findFirst({
-        where: { id: req.params.id, organizationId: req.user!.organizationId },
-      });
-
-      if (!payment) throw new AppError(404, 'NOT_FOUND', 'Payment not found');
-      if (!payment.postedJournalId || payment.status === PaymentStatus.DRAFT) {
-        throw new AppError(409, 'PAYMENT_NOT_POSTED', 'Only a posted payment can be reversed');
-      }
-      if (payment.status === PaymentStatus.REVERSED) {
-        throw new AppError(409, 'ALREADY_REVERSED', 'This payment has already been reversed');
-      }
-
-      if (payment.status === PaymentStatus.PARTIALLY_ALLOCATED || payment.status === PaymentStatus.FULLY_ALLOCATED) {
-        throw new AppError(409, 'HAS_ALLOCATIONS', 'Remove all allocations before reversing this payment');
-      }
-
-      await tx.supplierPayment.update({
-        where: { id: payment.id },
-        data: { status: PaymentStatus.REVERSED, postedJournalId: null, postedAt: null },
-      });
-
-      return { paymentId: payment.id };
+    const payment = await prisma.supplierPayment.findFirst({
+      where: { id: req.params.id, organizationId: req.user!.organizationId },
     });
+
+    if (!payment) throw new AppError(404, 'NOT_FOUND', 'Payment not found');
+    if (!payment.postedJournalId || payment.status === PaymentStatus.DRAFT) {
+      throw new AppError(409, 'PAYMENT_NOT_POSTED', 'Only a posted payment can be reversed');
+    }
+    if (payment.status === PaymentStatus.REVERSED) {
+      throw new AppError(409, 'ALREADY_REVERSED', 'This payment has already been reversed');
+    }
+    if (payment.status === PaymentStatus.PARTIALLY_ALLOCATED || payment.status === PaymentStatus.FULLY_ALLOCATED) {
+      throw new AppError(409, 'HAS_ALLOCATIONS', 'Remove all allocations before reversing this payment');
+    }
+
+    const { reversal } = await reverseJournal({
+      organizationId: req.user!.organizationId,
+      journalId: payment.postedJournalId,
+      reason,
+      reversedBy: req.user!.userId,
+      reversalDate,
+    });
+
+    await prisma.supplierPayment.update({
+      where: { id: payment.id },
+      data: { status: PaymentStatus.REVERSED },
+    });
+
+    const result = { paymentId: payment.id, reversalEntryId: reversal.id };
 
     res.json({ data: result, message: 'Supplier payment reversed' });
   })
