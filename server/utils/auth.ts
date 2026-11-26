@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import { prisma } from '../prisma';
 import { UserRole } from '@prisma/client';
 
@@ -38,12 +38,14 @@ export interface RefreshTokenPayload {
 }
 
 export function generateAccessToken(payload: JWTPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  const opts: SignOptions = { expiresIn: JWT_EXPIRES_IN as SignOptions['expiresIn'] };
+  return jwt.sign(payload as object, JWT_SECRET, opts);
 }
 
 export function generateRefreshToken(userId: string, tokenId: string): string {
   const payload: RefreshTokenPayload = { userId, tokenId };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: REFRESH_TOKEN_EXPIRES_IN });
+  const opts: SignOptions = { expiresIn: REFRESH_TOKEN_EXPIRES_IN as SignOptions['expiresIn'] };
+  return jwt.sign(payload as object, JWT_SECRET, opts);
 }
 
 export function verifyAccessToken(token: string): JWTPayload | null {

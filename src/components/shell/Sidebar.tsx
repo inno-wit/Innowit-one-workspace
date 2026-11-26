@@ -21,6 +21,11 @@ import {
   Shield,
   FolderKanban,
   Zap,
+  Receipt,
+  Calendar,
+  Percent,
+  PieChart,
+  BarChart2,
 } from 'lucide-react';
 import { UserRole, SystemModule } from '@/types';
 import { canViewModule } from '@/modules/auth/rbac';
@@ -62,7 +67,12 @@ export const NAVIGATION_SECTIONS: NavSection[] = [
       { id: 'chart-of-accounts', label: 'Chart of Accounts', href: '/accounting/chart-of-accounts', icon: Layers, module: 'ACCOUNTING' },
       { id: 'journal-entries', label: 'Journal Entries', href: '/accounting/journal-entries', icon: FileText, module: 'ACCOUNTING' },
       { id: 'invoices', label: 'Sales Invoices', href: '/accounting/invoices', icon: CreditCard, module: 'ACCOUNTING' },
-      { id: 'reports', label: 'Financial Reports', href: '/accounting/reports', icon: TrendingUp, module: 'BI_REPORTS' },
+      { id: 'supplier-bills', label: 'Supplier Bills', href: '/accounting/supplier-bills', icon: Receipt, module: 'ACCOUNTING' },
+      { id: 'fiscal-periods', label: 'Fiscal Periods', href: '/accounting/fiscal-periods', icon: Calendar, module: 'ACCOUNTING' },
+      { id: 'tax-codes', label: 'Tax Codes & VAT', href: '/accounting/tax-codes', icon: Percent, module: 'ACCOUNTING' },
+      { id: 'fx-rates', label: 'FX Rates', href: '/accounting/fx-rates', icon: BarChart2, module: 'ACCOUNTING' },
+      { id: 'budgets', label: 'Budgets', href: '/accounting/budgets', icon: PieChart, module: 'ACCOUNTING' },
+      { id: 'reports', label: 'Financial Reports (Live)', href: '/accounting/reports', icon: TrendingUp, module: 'BI_REPORTS' },
     ],
   },
   {

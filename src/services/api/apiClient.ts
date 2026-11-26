@@ -819,6 +819,200 @@ class ApiClient {
       body: JSON.stringify({ isActive }),
     });
   }
+
+  // =========================================================
+  // === PHASE 4: ACCOUNTING & FINANCIAL ENGINE ==============
+  // =========================================================
+
+  // --- Chart of Accounts ---
+  async getAccounts(params?: { type?: string; search?: string; isActive?: boolean; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/accounting/accounts?${query}`);
+  }
+  async getAccount(id: string) { return this.request<{ data: any }>(`/accounting/accounts/${id}`); }
+  async createAccount(data: { accountNumber: string; name: string; type: string; subType?: string; normalBalance?: string; currency?: string; description?: string; parentId?: string; isControl?: boolean }) {
+    return this.request<{ data: any }>('/accounting/accounts', { method: 'POST', body: JSON.stringify(data) });
+  }
+  async updateAccount(id: string, data: any) {
+    return this.request<{ data: any }>(`/accounting/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+  async getAccountLedger(id: string, params?: { from?: string; to?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/accounts/${id}/ledger?${query}`);
+  }
+
+  // --- Journal Entries ---
+  async getJournals(params?: { status?: string; from?: string; to?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/accounting/journals?${query}`);
+  }
+  async getJournal(id: string) { return this.request<{ data: any }>(`/accounting/journals/${id}`); }
+  async createJournal(data: { postingDate: string; description: string; lines: { accountId: string; debit?: string; credit?: string; description?: string }[]; currency?: string; exchangeRate?: string }) {
+    return this.request<{ data: any }>('/accounting/journals', { method: 'POST', body: JSON.stringify(data) });
+  }
+  async reverseJournal(id: string, data: { reason: string; reversalDate?: string }) {
+    return this.request<{ data: any }>(`/accounting/journals/${id}/reverse`, { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  // --- Customer Invoices (AR) ---
+  async getInvoices(params?: { status?: string; customerId?: string; from?: string; to?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/invoices?${query}`);
+  }
+  async getInvoice(id: string) { return this.request<{ data: any }>(`/invoices/${id}`); }
+  async createInvoice(data: any) { return this.request<{ data: any }>('/invoices', { method: 'POST', body: JSON.stringify(data) }); }
+  async postInvoice(id: string) { return this.request<{ data: any }>(`/invoices/${id}/post`, { method: 'POST' }); }
+  async voidInvoice(id: string, data: { reason: string }) { return this.request<{ data: any }>(`/invoices/${id}/void`, { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Customer Payments (AR) ---
+  async getCustomerPayments(params?: { status?: string; customerId?: string; from?: string; to?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/payments?${query}`);
+  }
+  async createCustomerPayment(data: any) { return this.request<{ data: any }>('/payments', { method: 'POST', body: JSON.stringify(data) }); }
+  async reverseCustomerPayment(id: string, data: { reason: string }) { return this.request<{ data: any }>(`/payments/${id}/reverse`, { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Credit Notes (AR) ---
+  async getCreditNotes(params?: { status?: string; customerId?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/credit-notes?${query}`);
+  }
+  async createCreditNote(data: any) { return this.request<{ data: any }>('/credit-notes', { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Supplier Bills (AP) ---
+  async getSupplierBills(params?: { status?: string; supplierId?: string; from?: string; to?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/suppliers/bills?${query}`);
+  }
+  async getSupplierBill(id: string) { return this.request<{ data: any }>(`/suppliers/bills/${id}`); }
+  async createSupplierBill(data: any) { return this.request<{ data: any }>('/suppliers/bills', { method: 'POST', body: JSON.stringify(data) }); }
+  async postSupplierBill(id: string) { return this.request<{ data: any }>(`/suppliers/bills/${id}/post`, { method: 'POST' }); }
+
+  // --- Supplier Payments (AP) ---
+  async getSupplierPayments(params?: { status?: string; supplierId?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/suppliers/payments?${query}`);
+  }
+  async createSupplierPayment(data: any) { return this.request<{ data: any }>('/suppliers/payments', { method: 'POST', body: JSON.stringify(data) }); }
+  async reverseSupplierPayment(id: string, data: { reason: string }) { return this.request<{ data: any }>(`/suppliers/payments/${id}/reverse`, { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Bank Accounts & Reconciliation ---
+  async getBankAccounts(params?: { page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/accounting/bank-accounts?${query}`);
+  }
+  async createBankAccount(data: any) { return this.request<{ data: any }>('/accounting/bank-accounts', { method: 'POST', body: JSON.stringify(data) }); }
+  async getBankStatements(bankAccountId: string, params?: { page?: number; limit?: number; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/accounting/bank-accounts/${bankAccountId}/statements?${query}`);
+  }
+  async importBankStatement(bankAccountId: string, data: any) { return this.request<{ data: any }>(`/accounting/bank-accounts/${bankAccountId}/statements`, { method: 'POST', body: JSON.stringify(data) }); }
+  async matchStatementLine(statementLineId: string, data: { paymentId?: string; journalId?: string }) { return this.request<{ data: any }>(`/accounting/bank-statements/${statementLineId}/match`, { method: 'POST', body: JSON.stringify(data) }); }
+  async unmatchStatementLine(statementLineId: string) { return this.request<{ data: any }>(`/accounting/bank-statements/${statementLineId}/unmatch`, { method: 'POST' }); }
+
+  // --- M-Pesa ---
+  async getMpesaTransactions(params?: { status?: string; page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[]; pagination: any }>(`/accounting/mpesa/transactions?${query}`);
+  }
+  async initiateMpesaStk(data: { phone: string; amount: string; invoiceId?: string; accountRef?: string }) {
+    return this.request<{ data: any }>('/accounting/mpesa/stk-push', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  // --- Fiscal Years & Periods ---
+  async getFiscalYears(params?: { page?: number; limit?: number }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[] }>(`/accounting/fiscal-years?${query}`);
+  }
+  async createFiscalYear(data: { name: string; startDate: string; endDate: string }) { return this.request<{ data: any }>('/accounting/fiscal-years', { method: 'POST', body: JSON.stringify(data) }); }
+  async getPeriods(params?: { fiscalYearId?: string; status?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[] }>(`/accounting/periods?${query}`);
+  }
+  async softClosePeriod(periodId: string) { return this.request<{ data: any }>(`/accounting/periods/${periodId}/soft-close`, { method: 'POST' }); }
+  async closePeriod(periodId: string) { return this.request<{ data: any }>(`/accounting/periods/${periodId}/close`, { method: 'POST' }); }
+  async reopenPeriod(periodId: string, data: { reason: string }) { return this.request<{ data: any }>(`/accounting/periods/${periodId}/reopen`, { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Tax Codes ---
+  async getTaxCodes(params?: { kind?: string; isActive?: boolean }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[] }>(`/accounting/tax-codes?${query}`);
+  }
+  async createTaxCode(data: any) { return this.request<{ data: any }>('/accounting/tax-codes', { method: 'POST', body: JSON.stringify(data) }); }
+  async getVatSummary(params?: { from?: string; to?: string; periodId?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/vat-summary?${query}`);
+  }
+
+  // --- FX Rates ---
+  async getFxRates(params?: { currency?: string; from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[] }>(`/accounting/fx-rates?${query}`);
+  }
+  async captureRate(data: { currency: string; rateValue: string; rateDate: string; rateType?: string }) { return this.request<{ data: any }>('/accounting/fx-rates', { method: 'POST', body: JSON.stringify(data) }); }
+  async runFxRevaluation(data: { revaluationDate: string }) { return this.request<{ data: any }>('/accounting/reports/fx-revaluation', { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Budgets ---
+  async getBudgets(params?: { fiscalYearId?: string; status?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any[] }>(`/accounting/budgets?${query}`);
+  }
+  async createBudget(data: any) { return this.request<{ data: any }>('/accounting/budgets', { method: 'POST', body: JSON.stringify(data) }); }
+  async approveBudget(id: string, data: { notes?: string }) { return this.request<{ data: any }>(`/accounting/budgets/${id}/approve`, { method: 'POST', body: JSON.stringify(data) }); }
+
+  // --- Financial Reports ---
+  async getTrialBalance(params?: { from?: string; to?: string; periodId?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/trial-balance?${query}`);
+  }
+  async getProfitAndLoss(params?: { from?: string; to?: string; periodId?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/profit-loss?${query}`);
+  }
+  async getBalanceSheet(params?: { asOf?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/balance-sheet?${query}`);
+  }
+  async getCashFlow(params?: { from?: string; to?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/cash-flow?${query}`);
+  }
+  async getArAgeing(params?: { asOf?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/ar-ageing?${query}`);
+  }
+  async getApAgeing(params?: { asOf?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/ap-ageing?${query}`);
+  }
+  async getBudgetVariance(params?: { fiscalYearId?: string }) {
+    const query = new URLSearchParams();
+    if (params) Object.entries(params).forEach(([k, v]) => v !== undefined && query.append(k, String(v)));
+    return this.request<{ data: any }>(`/accounting/reports/budget-variance?${query}`);
+  }
 }
 
 export class ApiError extends Error {

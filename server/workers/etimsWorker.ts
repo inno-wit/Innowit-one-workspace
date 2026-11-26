@@ -116,7 +116,7 @@ class EtimsWorker {
       if (response.success) {
         // Success - create EtimsInvoice record (audit fix ETIMS-3: check for
         // existing EtimsInvoice first so retries never duplicate the record)
-        await prisma.$transaction(async (tx) => {
+        await prisma.$transaction(async (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => {
           const existingEtimsInvoice = await tx.etimsInvoice.findUnique({
             where: { salesInvoiceId: salesInvoice.id },
           });
@@ -213,20 +213,20 @@ class EtimsWorker {
         signal: AbortSignal.timeout(30000),
       });
 
-      const data = await response.json();
+      const data = await response.json() as Record<string, any>;
 
-      if (response.ok && data.ackCode === '00') {
+      if (response.ok && (data as any).ackCode === '00') {
         return {
           success: true,
-          controlNumber: data.controlNumber,
-          internalData: data.internalData,
-          qrCodeUrl: data.qrCodeUrl,
-          ackCode: data.ackCode,
+          controlNumber: (data as any).controlNumber,
+          internalData: (data as any).internalData,
+          qrCodeUrl: (data as any).qrCodeUrl,
+          ackCode: (data as any).ackCode,
         };
       } else {
         return {
           success: false,
-          error: data.message || `HTTP ${response.status}: ${response.statusText}`,
+          error: (data as any).message || `HTTP ${response.status}: ${response.statusText}`,
         };
       }
     } catch (error) {

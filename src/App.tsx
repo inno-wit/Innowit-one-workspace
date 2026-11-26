@@ -21,6 +21,14 @@ import { RbacMatrixView } from '@/components/views/RbacMatrixView';
 import { ForbiddenNotice } from '@/components/views/ForbiddenNotice';
 import { InvoicesView } from '@/components/accounting/InvoicesView';
 import { FinancialReportsView } from '@/components/accounting/FinancialReportsView';
+import { SupplierBillsView } from '@/components/accounting/SupplierBillsView';
+import { FiscalPeriodsView } from '@/components/accounting/FiscalPeriodsView';
+import { TaxCodesView } from '@/components/accounting/TaxCodesView';
+import { FxRatesView } from '@/components/accounting/FxRatesView';
+import { AccountingReportsView } from '@/components/accounting/AccountingReportsView';
+import { ChartOfAccountsApiView } from '@/components/accounting/ChartOfAccountsApiView';
+import { JournalEntriesApiView } from '@/components/accounting/JournalEntriesApiView';
+import { InvoicesApiView } from '@/components/accounting/InvoicesApiView';
 import { ProcurementView } from '@/components/views/ProcurementView';
 import { HrPayrollView } from '@/components/views/HrPayrollView';
 import { ExecutiveBiView } from '@/components/views/ExecutiveBiView';
@@ -1036,55 +1044,64 @@ export default function App() {
       );
     }
 
-    // Chart of Accounts
+    // Chart of Accounts — Phase 4 API-wired
     if (currentPath === '/accounting/chart-of-accounts') {
-      return (
-        <ChartOfAccountsView
-          accounts={accounts}
-          onAddAccount={handleAddAccount}
-          userRole={currentUser.role}
-          journalEntries={journalEntries}
-        />
-      );
+      return <ChartOfAccountsApiView userRole={currentUser.role} />;
     }
 
-    // Accounts Receivable & Sales Invoices
+    // Accounts Receivable & Sales Invoices — Phase 4 API-wired
     if (currentPath === '/accounting/invoices') {
-      return (
-        <InvoicesView
-          invoices={invoices}
-          customers={customers}
-          products={products}
-          onCreateInvoice={handleCreateInvoice}
-          onRecordPayment={handleRecordPayment}
-          userRole={currentUser.role}
-          userFullName={currentUser.fullName}
-        />
-      );
+      return <InvoicesApiView userRole={currentUser.role} userFullName={currentUser.fullName} />;
     }
 
-    // Real-Time GAAP Financial Reports (P&L, Balance Sheet, Trial Balance)
+    // Real-Time GAAP Financial Reports (P&L, Balance Sheet, Trial Balance) - Live API
     if (currentPath === '/accounting/reports') {
       return (
-        <FinancialReportsView
-          accounts={accounts}
-          journalEntries={journalEntries}
-        />
+        <AccountingReportsView userRole={currentUser.role} />
       );
     }
 
-    // Journal Entries & Double-Entry General Ledger
-    if (currentPath === '/accounting/journal-entries') {
+    // Phase 4: Supplier Bills (AP)
+    if (currentPath === '/accounting/supplier-bills') {
+      return <SupplierBillsView userRole={currentUser.role} />;
+    }
+
+    // Phase 4: Fiscal Periods
+    if (currentPath === '/accounting/fiscal-periods') {
+      return <FiscalPeriodsView userRole={currentUser.role} />;
+    }
+
+    // Phase 4: Tax Codes & VAT
+    if (currentPath === '/accounting/tax-codes') {
+      return <TaxCodesView userRole={currentUser.role} />;
+    }
+
+    // Phase 4: FX Rates
+    if (currentPath === '/accounting/fx-rates') {
+      return <FxRatesView userRole={currentUser.role} />;
+    }
+
+    // Phase 4: Budgets (placeholder — API-ready)
+    if (currentPath === '/accounting/budgets') {
       return (
-        <JournalEntriesView
-          entries={journalEntries}
-          accounts={accounts}
-          onAddEntry={handleAddJournalEntry}
-          onReverseEntry={handleReverseJournalEntry}
-          userRole={currentUser.role}
-          userFullName={currentUser.fullName}
-        />
+        <div className="p-8 flex flex-col items-center justify-center gap-4 text-center">
+          <div className="w-16 h-16 rounded-full bg-[#00B3C8]/10 flex items-center justify-center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00B3C8" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+            </svg>
+          </div>
+          <h2 className="text-lg font-semibold text-[#1E293B]">Budgets</h2>
+          <p className="text-sm text-[#64748B] max-w-sm">
+            Budget management connects to <code className="bg-[#F1F5F9] px-1 rounded">/api/accounting/budgets</code>.
+            Phase 5 will add variance analysis and approval workflows.
+          </p>
+        </div>
       );
+    }
+
+    // Journal Entries & Double-Entry General Ledger — Phase 4 API-wired
+    if (currentPath === '/accounting/journal-entries') {
+      return <JournalEntriesApiView userRole={currentUser.role} userFullName={currentUser.fullName} />;
     }
 
     // eTIMS Compliance (Phase 6)
@@ -1291,14 +1308,7 @@ export default function App() {
     }
 
     // Fallback default
-    return (
-      <ChartOfAccountsView
-        accounts={accounts}
-        onAddAccount={handleAddAccount}
-        userRole={currentUser.role}
-        journalEntries={journalEntries}
-      />
-    );
+    return <ChartOfAccountsApiView userRole={currentUser.role} />;
   };
 
   return (

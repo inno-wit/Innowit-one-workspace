@@ -68,7 +68,7 @@ export class LocalStorageImportWizard {
   private userId: string;
   private dryRun: boolean;
   private importId: string;
-  private contentHash: string;
+  private contentHash: string = '';
 
   constructor(organizationId: string, userId: string, dryRun = false) {
     this.organizationId = organizationId;
